@@ -1,0 +1,67 @@
+// Tandem sample file demonstrating the rich type system
+// Showcases: primitives, generics, optional shorthand, array shorthand
+
+module sample.generics
+
+// Type aliases using primitives
+type UserId = UUID
+type Email = Email
+type Score = Float
+type IsActive = Bool
+type CreatedAt = DateTime
+type Balance = Decimal
+
+// Optional field shorthand (String? = Optional<String>)
+type UserProfile {
+  id: UserId
+  email: Email
+  name: String
+  bio: Optional<String>
+  avatarUrl: String?
+  isActive: Bool
+}
+
+// List types
+type Tag = String
+type TagList = List<Tag>
+
+type Post {
+  id: UUID
+  title: String
+  tags: List<String>
+  comments: String[]
+}
+
+// Map types
+type Settings = Map<String, JSON>
+type UserScores = Map<String, Score>
+
+// Result type for error handling
+type UserError {
+  code: String
+  message: String
+}
+type UserResult = Result<UserProfile, UserError>
+
+// Nested generics
+type MaybeUsers = Optional<List<UserProfile>>
+type UserMatrix = List<List<UserProfile>>
+
+// Intent with generic types
+intent route SearchUsers {
+  input: {
+    query: String
+    tags: List<String>
+    limit: Int?
+  }
+  output: List<UserProfile>
+  spec: "Search for users by query and tags"
+}
+
+intent route GetUserResult {
+  input: {
+    id: UserId
+  }
+  output: Result<UserProfile, UserError>
+  spec: "Get user by ID with error handling"
+}

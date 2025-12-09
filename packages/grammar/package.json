@@ -1,0 +1,20 @@
+{
+  "name": "@tandem-lang/grammar",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build:parser": "lezer-generator src/tandem.grammar -o src/tandem.parser.ts",
+    "build": "pnpm build:parser && tsc -b",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@lezer/generator": "^1.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  },
+  "dependencies": {
+    "@lezer/common": "^1.0.0",
+    "@lezer/lr": "^1.0.0"
+  }
+}

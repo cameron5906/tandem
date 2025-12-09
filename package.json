@@ -1,0 +1,19 @@
+{
+  "name": "tandem-monorepo",
+  "private": true,
+  "description": "Monorepo for the Tandem language",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm build && vitest run",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0",
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0"
+  }
+}

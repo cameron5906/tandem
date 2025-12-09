@@ -1,0 +1,86 @@
+@top Program { (ModuleDecl | TypeDecl | IntentDecl)* }
+
+@tokens {
+  whitespace { @whitespace+ }
+  LineComment { "//" ![\n]* }
+  Identifier { @asciiLetter (@asciiLetter | @digit | "_")* }
+  String { '"' (!["\\] | "\\" _)* '"' }
+  LBrace { "{" }
+  RBrace { "}" }
+  LParen { "(" }
+  RParen { ")" }
+  LAngle { "<" }
+  RAngle { ">" }
+  LBracket { "[" }
+  RBracket { "]" }
+  Dot { "." }
+  Colon { ":" }
+  Comma { "," }
+  Equals { "=" }
+  Question { "?" }
+  At { "@" }
+  module { "module" }
+  type { "type" }
+  intent { "intent" }
+  route { "route" }
+  input { "input" }
+  output { "output" }
+  spec { "spec" }
+}
+
+@skip { whitespace | LineComment }
+
+QualifiedIdentifier { Identifier (Dot Identifier)* }
+
+// Annotation: @name or @name(value)
+Annotation { At Identifier AnnotationArgs? }
+AnnotationArgs { LParen AnnotationValue RParen }
+AnnotationValue { Identifier | String }
+
+ModuleDecl { Annotation* module QualifiedIdentifier }
+
+TypeDecl {
+  type Identifier (
+    Equals TypeRef |
+    LBrace FieldDecl* RBrace
+  )
+}
+
+FieldDecl { Identifier Colon TypeRef }
+
+// TypeRef supports: simple types, generics, arrays, and optionals
+// Examples: String, List<String>, String[], String?, Optional<List<User>>
+TypeRef { BaseTypeRef OptionalMarker? }
+
+BaseTypeRef {
+  GenericTypeRef |
+  ArrayTypeRef |
+  SimpleTypeRef
+}
+
+SimpleTypeRef { QualifiedIdentifier }
+
+// Generic types: List<T>, Map<K, V>, Optional<T>, Result<T, E>
+GenericTypeRef { QualifiedIdentifier LAngle TypeArgList RAngle }
+
+TypeArgList { TypeRef (Comma TypeRef)* }
+
+// Array shorthand: String[] (equivalent to List<String>)
+ArrayTypeRef { QualifiedIdentifier LBracket RBracket }
+
+// Optional shorthand marker: String? (equivalent to Optional<String>)
+OptionalMarker { Question }
+
+IntentDecl {
+  intent route Identifier LBrace
+    IntentBodyProperty*
+  RBrace
+}
+
+IntentBodyProperty {
+  (input Colon ObjectType) |
+  (output Colon TypeRef) |
+  (spec Colon String)
+}
+
+ObjectType { LBrace FieldDecl* RBrace }

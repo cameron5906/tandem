@@ -1,0 +1,21 @@
+{
+  "name": "@tandem-lang/generator-ts",
+  "version": "0.1.0",
+  "description": "TypeScript code generator for Tandem IR",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  },
+  "dependencies": {
+    "@tandem-lang/compiler": "workspace:^"
+  }
+}

@@ -1,0 +1,48 @@
+// Example demonstrating module annotations in Tandem
+// Annotations configure code generation targets per module
+
+@backend(express)
+@frontend(react)
+module api.users
+
+// Type definitions are shared across all targets
+type UserId = UUID
+
+type User {
+  id: UserId
+  name: String
+  email: Email
+  createdAt: DateTime
+}
+
+type UserProfile {
+  user: User
+  bio: String?
+  avatar: URL?
+  tags: String[]
+}
+
+// Intents define API contracts
+// @backend(express) -> generates Express routes
+// @frontend(react)  -> generates React hooks (future)
+intent route GetUser {
+  input: { id: UserId }
+  output: User
+  spec: "Fetch a user by their ID"
+}
+
+intent route GetUserProfile {
+  input: { userId: UserId }
+  output: UserProfile
+  spec: "Fetch a user's profile with extended info"
+}
+
+intent route UpdateProfile {
+  input: {
+    userId: UserId
+    bio: String?
+    tags: List<String>
+  }
+  output: UserProfile
+  spec: "Update user profile fields"
+}

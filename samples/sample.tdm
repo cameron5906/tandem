@@ -1,0 +1,19 @@
+// A sample Tandem project.
+
+module sample.project
+
+// You can define custom types.
+type UserId = UUID
+type User {
+  id: UserId
+  name: String
+}
+
+// Intents define the expected inputs and outputs of your program.
+intent route GetUser {
+  input: {
+    id: UserId
+  }
+  output: User
+  spec: "Returns a user by ID."
+}

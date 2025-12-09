@@ -1,0 +1,21 @@
+{
+  "name": "@tandem-lang/cli",
+  "version": "0.1.0",
+  "bin": {
+    "tandem": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  },
+  "dependencies": {
+    "@tandem-lang/compiler": "workspace:*",
+    "@tandem-lang/generator-ts": "workspace:*",
+    "commander": "^11.0.0"
+  }
+}
