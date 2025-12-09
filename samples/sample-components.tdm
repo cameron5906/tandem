@@ -1,0 +1,91 @@
+// Sample Tandem file demonstrating component declarations
+
+@frontend(react)
+module app.users
+
+// Domain types
+type UserId = UUID
+
+type User {
+  id: UserId
+  name: String
+  email: Email
+}
+
+// Intent routes
+intent route GetUser {
+  input: { id: UserId }
+  output: User
+  spec: "Fetch a user by ID"
+}
+
+intent route ListUsers {
+  input: { limit: Int? }
+  output: List<User>
+  spec: "List all users with optional limit"
+}
+
+type CreateUserInput {
+  name: String
+  email: Email
+}
+
+intent route CreateUser {
+  input: { data: CreateUserInput }
+  output: User
+  spec: "Create a new user"
+}
+
+type UpdateUserInput {
+  id: UserId
+  name: String?
+  email: Email?
+}
+
+intent route UpdateUser {
+  input: { data: UpdateUserInput }
+  output: User
+  spec: "Update an existing user"
+}
+
+intent route DeleteUser {
+  input: { id: UserId }
+  output: Bool
+  spec: "Delete a user"
+}
+
+// Component declarations
+component UserCard {
+  element: card
+  displays: User
+  actions: [UpdateUser, DeleteUser]
+  spec: "Displays user info with edit and delete actions"
+}
+
+component CreateUserForm {
+  element: form
+  binds: CreateUser
+  spec: "Form to create a new user"
+}
+
+component UserList {
+  element: list
+  displays: List<User>
+  itemComponent: UserCard
+  emptyState: "No users found"
+  spec: "Scrollable list of users"
+}
+
+component UserTable {
+  element: table
+  displays: List<User>
+  actions: [UpdateUser, DeleteUser]
+  spec: "Paginated table of users"
+}
+
+component EditUserModal {
+  element: modal
+  binds: UpdateUser
+  displays: User
+  spec: "Modal dialog for editing user details"
+}

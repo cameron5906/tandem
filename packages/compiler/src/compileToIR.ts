@@ -4,6 +4,7 @@ import {
   TypeDefNode,
   IntentDeclNode,
   TypeRefNode,
+  ComponentDeclNode,
 } from "./ast";
 import {
   TandemIR,
@@ -11,6 +12,8 @@ import {
   IRType,
   IRTypeRef,
   IRField,
+  IRComponent,
+  IRComponentElement,
   simpleType,
   genericType,
 } from "./ir";
@@ -31,6 +34,7 @@ class Compiler {
     modules: new Map(),
     types: new Map(),
     intents: new Map(),
+    components: new Map(),
   };
   private diagnostics: Diagnostic[] = [];
   private currentModule: string = "";
@@ -61,6 +65,11 @@ class Compiler {
     // Second pass: process all intents.
     for (const intent of this.program.intents) {
       this.compileIntent(intent);
+    }
+
+    // Third pass: process all components.
+    for (const component of this.program.components) {
+      this.compileComponent(component);
     }
 
     return {
@@ -128,6 +137,142 @@ class Compiler {
     };
 
     this.ir.intents.set(fqn, irIntent);
+  }
+
+  private compileComponent(component: ComponentDeclNode) {
+    const fqn = this.fqn(component.name);
+
+    // Validate: check for duplicate component declarations
+    if (this.ir.components.has(fqn)) {
+      this.diagnostics.push({
+        message: `Duplicate component declaration: ${fqn}`,
+        from: component.span.from,
+        to: component.span.to,
+      });
+      return;
+    }
+
+    // Validate: components can only be declared in @frontend modules
+    if (!this.isInFrontendModule()) {
+      this.diagnostics.push({
+        message: `Component '${component.name}' can only be declared in @frontend modules`,
+        from: component.span.from,
+        to: component.span.to,
+      });
+      return;
+    }
+
+    // Resolve binds reference (intent binding)
+    let resolvedBinds: string | undefined;
+    if (component.binds) {
+      resolvedBinds = this.resolveIntentRef(component.binds, component.span);
+    }
+
+    // Resolve actions references
+    let resolvedActions: string[] | undefined;
+    if (component.actions && component.actions.length > 0) {
+      resolvedActions = [];
+      for (const action of component.actions) {
+        const resolved = this.resolveIntentRef(action, component.span);
+        if (resolved) {
+          resolvedActions.push(resolved);
+        }
+      }
+    }
+
+    // Resolve itemComponent reference
+    let resolvedItemComponent: string | undefined;
+    if (component.itemComponent) {
+      // For now, just qualify the name - forward references are allowed
+      resolvedItemComponent = this.fqn(component.itemComponent);
+    }
+
+    // Resolve displays type
+    let resolvedDisplays: IRTypeRef | undefined;
+    if (component.displays) {
+      resolvedDisplays = this.resolveTypeRef(component.displays);
+    }
+
+    // Semantic validation based on element type
+    this.validateComponentSemantics(component, fqn);
+
+    const irComponent: IRComponent = {
+      name: fqn,
+      element: component.element as IRComponentElement,
+      displays: resolvedDisplays,
+      binds: resolvedBinds,
+      actions: resolvedActions,
+      itemComponent: resolvedItemComponent,
+      emptyState: component.emptyState,
+      spec: component.spec,
+    };
+
+    this.ir.components.set(fqn, irComponent);
+  }
+
+  private isInFrontendModule(): boolean {
+    const module = this.ir.modules.get(this.currentModule);
+    if (!module) return false;
+    return module.annotations.some((a) => a.name === "frontend");
+  }
+
+  private resolveIntentRef(
+    name: string,
+    span: { from: number; to: number }
+  ): string | undefined {
+    // Try as FQN first
+    const fqn = this.fqn(name);
+    if (this.ir.intents.has(fqn)) {
+      return fqn;
+    }
+
+    // Try as already fully qualified
+    if (this.ir.intents.has(name)) {
+      return name;
+    }
+
+    this.diagnostics.push({
+      message: `Cannot resolve intent reference: ${name}`,
+      from: span.from,
+      to: span.to,
+    });
+    return undefined;
+  }
+
+  private validateComponentSemantics(component: ComponentDeclNode, fqn: string) {
+    switch (component.element) {
+      case "form":
+        if (!component.binds) {
+          this.diagnostics.push({
+            message: `Form component '${fqn}' must have a 'binds' property`,
+            from: component.span.from,
+            to: component.span.to,
+          });
+        }
+        break;
+
+      case "list":
+      case "table":
+        if (!component.displays) {
+          this.diagnostics.push({
+            message: `${component.element} component '${fqn}' must have a 'displays' property`,
+            from: component.span.from,
+            to: component.span.to,
+          });
+        }
+        break;
+
+      case "card":
+      case "detail":
+        if (!component.displays) {
+          this.diagnostics.push({
+            message: `${component.element} component '${fqn}' must have a 'displays' property`,
+            from: component.span.from,
+            to: component.span.to,
+          });
+        }
+        break;
+    }
   }
 
   // Resolve a TypeRefNode to an IRTypeRef

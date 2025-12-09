@@ -7,6 +7,32 @@ export interface ProgramNode {
   modules: ModuleNode[];
   types: TypeDeclNode[];
   intents: IntentDeclNode[];
+  components: ComponentDeclNode[];
+}
+
+// Component element types for semantic UI descriptions
+export type ComponentElementType =
+  | "card"
+  | "form"
+  | "list"
+  | "table"
+  | "modal"
+  | "button"
+  | "detail"
+  | "dashboard";
+
+// Component declaration for frontend UI
+export interface ComponentDeclNode {
+  name: string;
+  module?: ModuleNode;
+  element: ComponentElementType;
+  displays?: TypeRefNode;
+  binds?: string;
+  actions?: string[];
+  itemComponent?: string;
+  emptyState?: string;
+  spec?: string;
+  span: Span;
 }
 
 export interface AnnotationNode {

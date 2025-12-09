@@ -6,5 +6,5 @@
     "composite": true
   },
   "include": ["src"],
-  "references": [{ "path": "../compiler" }]
+  "references": [{ "path": "../compiler" }, { "path": "../generator-core" }]
 }

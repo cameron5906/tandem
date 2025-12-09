@@ -4,13 +4,31 @@ import {
   compileToIR,
   simpleType,
   genericType,
+  TandemIR,
+  createEmptyIR,
 } from "@tandem-lang/compiler";
 import {
   generateTypeScript,
   TypeScriptTypeMapper,
   TypeDeclarationEmitter,
+  ExpressRouteEmitter,
+  ApiClientEmitter,
+  ReactHooksEmitter,
+  TypesGenerator,
+  ExpressGenerator,
+  ReactGenerator,
   shorten,
+  toCamelCase,
+  toHandlerName,
+  toHookName,
+  toApiMethodName,
+  toRoutePath,
+  classifyIntent,
+  isQueryIntent,
+  isMutationIntent,
+  registerAllGenerators,
 } from "./src";
+import { generatorRegistry, GeneratorContext } from "@tandem-lang/generator-core";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -315,5 +333,736 @@ type ListOfMaybe = List<Optional<String>>
     expect(generatedCode).toContain(
       "export type ListOfMaybe = (string | null)[];"
     );
+  });
+});
+
+// =============================================================================
+// Naming Utility Tests
+// =============================================================================
+
+describe("toCamelCase", () => {
+  it("converts PascalCase to camelCase", () => {
+    expect(toCamelCase("GetUser")).toBe("getUser");
+    expect(toCamelCase("CreateTask")).toBe("createTask");
+    expect(toCamelCase("ListTasks")).toBe("listTasks");
+  });
+
+  it("handles single letter", () => {
+    expect(toCamelCase("A")).toBe("a");
+  });
+
+  it("handles empty string", () => {
+    expect(toCamelCase("")).toBe("");
+  });
+
+  it("handles already camelCase", () => {
+    expect(toCamelCase("getUser")).toBe("getUser");
+  });
+});
+
+describe("toHandlerName", () => {
+  it("converts intent name to handler name", () => {
+    expect(toHandlerName("api.tasks.GetTask")).toBe("getTaskHandler");
+    expect(toHandlerName("CreateUser")).toBe("createUserHandler");
+  });
+});
+
+describe("toHookName", () => {
+  it("converts intent name to hook name", () => {
+    expect(toHookName("api.tasks.GetTask")).toBe("useGetTask");
+    expect(toHookName("CreateUser")).toBe("useCreateUser");
+  });
+});
+
+describe("toApiMethodName", () => {
+  it("converts intent name to API method name", () => {
+    expect(toApiMethodName("api.tasks.GetTask")).toBe("getTask");
+    expect(toApiMethodName("CreateUser")).toBe("createUser");
+  });
+});
+
+describe("toRoutePath", () => {
+  it("converts intent name to route path", () => {
+    expect(toRoutePath("api.tasks.GetTask")).toBe("/getTask");
+    expect(toRoutePath("CreateUser")).toBe("/createUser");
+  });
+});
+
+// =============================================================================
+// Intent Classifier Tests
+// =============================================================================
+
+describe("classifyIntent", () => {
+  describe("query intents (GET)", () => {
+    it("classifies Get* as query/GET", () => {
+      expect(classifyIntent("GetUser")).toEqual({ kind: "query", method: "GET" });
+      expect(classifyIntent("api.GetTask")).toEqual({ kind: "query", method: "GET" });
+    });
+
+    it("classifies List* as query/GET", () => {
+      expect(classifyIntent("ListTasks")).toEqual({ kind: "query", method: "GET" });
+    });
+
+    it("classifies Search* as query/GET", () => {
+      expect(classifyIntent("SearchUsers")).toEqual({ kind: "query", method: "GET" });
+    });
+
+    it("classifies Find* as query/GET", () => {
+      expect(classifyIntent("FindByEmail")).toEqual({ kind: "query", method: "GET" });
+    });
+
+    it("classifies Fetch* as query/GET", () => {
+      expect(classifyIntent("FetchData")).toEqual({ kind: "query", method: "GET" });
+    });
+
+    it("classifies Load* as query/GET", () => {
+      expect(classifyIntent("LoadProfile")).toEqual({ kind: "query", method: "GET" });
+    });
+  });
+
+  describe("create intents (POST)", () => {
+    it("classifies Create* as mutation/POST", () => {
+      expect(classifyIntent("CreateUser")).toEqual({ kind: "mutation", method: "POST" });
+    });
+
+    it("classifies Add* as mutation/POST", () => {
+      expect(classifyIntent("AddComment")).toEqual({ kind: "mutation", method: "POST" });
+    });
+
+    it("classifies Insert* as mutation/POST", () => {
+      expect(classifyIntent("InsertRecord")).toEqual({ kind: "mutation", method: "POST" });
+    });
+  });
+
+  describe("update intents (PUT)", () => {
+    it("classifies Update* as mutation/PUT", () => {
+      expect(classifyIntent("UpdateUser")).toEqual({ kind: "mutation", method: "PUT" });
+    });
+
+    it("classifies Edit* as mutation/PUT", () => {
+      expect(classifyIntent("EditProfile")).toEqual({ kind: "mutation", method: "PUT" });
+    });
+
+    it("classifies Modify* as mutation/PUT", () => {
+      expect(classifyIntent("ModifySettings")).toEqual({ kind: "mutation", method: "PUT" });
+    });
+
+    it("classifies Set* as mutation/PUT", () => {
+      expect(classifyIntent("SetPreferences")).toEqual({ kind: "mutation", method: "PUT" });
+    });
+  });
+
+  describe("delete intents (DELETE)", () => {
+    it("classifies Delete* as mutation/DELETE", () => {
+      expect(classifyIntent("DeleteUser")).toEqual({ kind: "mutation", method: "DELETE" });
+    });
+
+    it("classifies Remove* as mutation/DELETE", () => {
+      expect(classifyIntent("RemoveItem")).toEqual({ kind: "mutation", method: "DELETE" });
+    });
+
+    it("classifies Destroy* as mutation/DELETE", () => {
+      expect(classifyIntent("DestroySession")).toEqual({ kind: "mutation", method: "DELETE" });
+    });
+  });
+
+  describe("default behavior", () => {
+    it("defaults to mutation/POST for unrecognized patterns", () => {
+      expect(classifyIntent("ProcessPayment")).toEqual({ kind: "mutation", method: "POST" });
+      expect(classifyIntent("SendEmail")).toEqual({ kind: "mutation", method: "POST" });
+    });
+  });
+});
+
+describe("isQueryIntent / isMutationIntent", () => {
+  it("correctly identifies query intents", () => {
+    expect(isQueryIntent("GetUser")).toBe(true);
+    expect(isQueryIntent("ListTasks")).toBe(true);
+    expect(isQueryIntent("CreateTask")).toBe(false);
+  });
+
+  it("correctly identifies mutation intents", () => {
+    expect(isMutationIntent("CreateTask")).toBe(true);
+    expect(isMutationIntent("UpdateUser")).toBe(true);
+    expect(isMutationIntent("GetUser")).toBe(false);
+  });
+});
+
+// =============================================================================
+// TypeDeclarationEmitter with Intent Types Tests
+// =============================================================================
+
+describe("TypeDeclarationEmitter with intent types", () => {
+  const mapper = new TypeScriptTypeMapper();
+
+  it("generates input/output types for intents", () => {
+    const source = `
+module test.api
+
+type UserId = UUID
+
+intent route GetUser {
+  input: { id: UserId }
+  output: String
+  spec: "Get user by ID"
+}
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const emitter = new TypeDeclarationEmitter(mapper, { includeIntentTypes: true });
+    const files = emitter.emit(ir);
+
+    expect(files[0].content).toContain("export interface GetUserInput {");
+    expect(files[0].content).toContain("id: UserId;");
+    expect(files[0].content).toContain("export type GetUserOutput = string;");
+  });
+
+  it("can disable intent type generation", () => {
+    const source = `
+module test.api
+
+intent route GetUser {
+  input: { id: UUID }
+  output: String
+}
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const emitter = new TypeDeclarationEmitter(mapper, { includeIntentTypes: false });
+    const files = emitter.emit(ir);
+
+    expect(files[0].content).not.toContain("GetUserInput");
+    expect(files[0].content).not.toContain("GetUserOutput");
+  });
+});
+
+// =============================================================================
+// ExpressRouteEmitter Tests
+// =============================================================================
+
+describe("ExpressRouteEmitter", () => {
+  const emitter = new ExpressRouteEmitter();
+
+  it("generates handlers and router files", () => {
+    const source = `
+@backend(express)
+module test.api
+
+type TaskId = UUID
+
+intent route GetTask {
+  input: { id: TaskId }
+  output: String
+  spec: "Get task by ID"
+}
+
+intent route CreateTask {
+  input: { title: String }
+  output: String
+  spec: "Create a new task"
+}
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const files = emitter.emit(ir);
+
+    expect(files).toHaveLength(2);
+    expect(files[0].filename).toBe("routes/handlers.ts");
+    expect(files[1].filename).toBe("routes/index.ts");
+  });
+
+  it("generates typed handlers with correct HTTP method behavior", () => {
+    const source = `
+@backend(express)
+module test.api
+
+intent route GetTask {
+  input: { id: UUID }
+  output: String
+}
+
+intent route CreateTask {
+  input: { title: String }
+  output: String
+}
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const files = emitter.emit(ir);
+    const handlersContent = files[0].content;
+
+    // GET handler should use req.query
+    expect(handlersContent).toContain("getTaskHandler");
+    expect(handlersContent).toContain("req.query as GetTaskInput");
+
+    // POST handler should use req.body
+    expect(handlersContent).toContain("createTaskHandler");
+    expect(handlersContent).toContain("req.body as CreateTaskInput");
+  });
+
+  it("generates router with correct HTTP methods", () => {
+    const source = `
+@backend(express)
+module test.api
+
+intent route GetTask { input: { id: UUID } output: String }
+intent route CreateTask { input: { title: String } output: String }
+intent route UpdateTask { input: { id: UUID, title: String } output: String }
+intent route DeleteTask { input: { id: UUID } output: Bool }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const files = emitter.emit(ir);
+    const routerContent = files[1].content;
+
+    expect(routerContent).toContain('router.get("/getTask"');
+    expect(routerContent).toContain('router.post("/createTask"');
+    expect(routerContent).toContain('router.put("/updateTask"');
+    expect(routerContent).toContain('router.delete("/deleteTask"');
+  });
+
+  it("includes JSDoc comments from spec", () => {
+    const source = `
+@backend(express)
+module test.api
+
+intent route GetTask {
+  input: { id: UUID }
+  output: String
+  spec: "Fetch a task by its unique identifier"
+}
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const files = emitter.emit(ir);
+
+    expect(files[0].content).toContain("* Fetch a task by its unique identifier");
+  });
+});
+
+// =============================================================================
+// ApiClientEmitter Tests
+// =============================================================================
+
+describe("ApiClientEmitter", () => {
+  it("generates API client with typed methods", () => {
+    const source = `
+@frontend(react)
+module test.api
+
+intent route GetTask { input: { id: UUID } output: String }
+intent route CreateTask { input: { title: String } output: String }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const emitter = new ApiClientEmitter();
+    const files = emitter.emit(ir);
+
+    expect(files).toHaveLength(1);
+    expect(files[0].filename).toBe("api/client.ts");
+    expect(files[0].content).toContain("export const api = {");
+    expect(files[0].content).toContain("getTask:");
+    expect(files[0].content).toContain("createTask:");
+  });
+
+  it("uses correct HTTP methods for queries and mutations", () => {
+    const source = `
+@frontend(react)
+module test.api
+
+intent route GetTask { input: { id: UUID } output: String }
+intent route CreateTask { input: { title: String } output: String }
+intent route UpdateTask { input: { id: UUID } output: String }
+intent route DeleteTask { input: { id: UUID } output: Bool }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const emitter = new ApiClientEmitter();
+    const files = emitter.emit(ir);
+    const content = files[0].content;
+
+    // GET methods use query string
+    expect(content).toContain('method: "GET"');
+    expect(content).toContain("toQueryString(input");
+
+    // POST/PUT methods use body
+    expect(content).toContain('method: "POST"');
+    expect(content).toContain('method: "PUT"');
+    expect(content).toContain('method: "DELETE"');
+    expect(content).toContain("JSON.stringify(input)");
+  });
+
+  it("uses custom base URL", () => {
+    const source = `
+@frontend(react)
+module test.api
+intent route GetTask { input: { id: UUID } output: String }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const emitter = new ApiClientEmitter({ baseUrl: "/custom/api" });
+    const files = emitter.emit(ir);
+
+    expect(files[0].content).toContain('BASE_URL = "/custom/api"');
+  });
+});
+
+// =============================================================================
+// ReactHooksEmitter Tests
+// =============================================================================
+
+describe("ReactHooksEmitter", () => {
+  it("generates hooks with correct types", () => {
+    const source = `
+@frontend(react)
+module test.api
+
+intent route GetTask { input: { id: UUID } output: String }
+intent route CreateTask { input: { title: String } output: String }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const emitter = new ReactHooksEmitter();
+    const files = emitter.emit(ir);
+
+    expect(files).toHaveLength(1);
+    expect(files[0].filename).toBe("hooks/index.ts");
+  });
+
+  it("generates useQuery hooks for query intents", () => {
+    const source = `
+@frontend(react)
+module test.api
+intent route GetTask { input: { id: UUID } output: String }
+intent route ListTasks { input: { limit: Int } output: String }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const emitter = new ReactHooksEmitter();
+    const files = emitter.emit(ir);
+    const content = files[0].content;
+
+    expect(content).toContain("export function useGetTask(");
+    expect(content).toContain("export function useListTasks(");
+    expect(content).toContain("useQuery({");
+    expect(content).toContain('queryKey: ["GetTask", input]');
+  });
+
+  it("generates useMutation hooks for mutation intents", () => {
+    const source = `
+@frontend(react)
+module test.api
+intent route CreateTask { input: { title: String } output: String }
+intent route UpdateTask { input: { id: UUID } output: String }
+intent route DeleteTask { input: { id: UUID } output: Bool }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const emitter = new ReactHooksEmitter();
+    const files = emitter.emit(ir);
+    const content = files[0].content;
+
+    expect(content).toContain("export function useCreateTask(");
+    expect(content).toContain("export function useUpdateTask(");
+    expect(content).toContain("export function useDeleteTask(");
+    expect(content).toContain("useMutation({");
+    expect(content).toContain("mutationFn:");
+  });
+});
+
+// =============================================================================
+// Generator Classes Tests
+// =============================================================================
+
+describe("TypesGenerator", () => {
+  it("has correct metadata", () => {
+    const generator = new TypesGenerator();
+
+    expect(generator.meta.id).toBe("typescript:types");
+    expect(generator.meta.target).toBe("shared");
+    expect(generator.meta.language).toBe("typescript");
+  });
+
+  it("generates types file", () => {
+    const source = `
+module test
+type UserId = UUID
+type User { id: UserId name: String }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const generator = new TypesGenerator();
+    const context: GeneratorContext = {
+      ir,
+      config: { outputDir: "./out" },
+      targetModules: Array.from(ir.modules.values()),
+    };
+
+    const output = generator.generate(context);
+
+    expect(output.files).toHaveLength(1);
+    expect(output.files[0].path).toBe("types.ts");
+    expect(output.files[0].content).toContain("export type UserId");
+    expect(output.files[0].content).toContain("export interface User");
+  });
+});
+
+describe("ExpressGenerator", () => {
+  it("has correct metadata", () => {
+    const generator = new ExpressGenerator();
+
+    expect(generator.meta.id).toBe("typescript:express");
+    expect(generator.meta.target).toBe("backend");
+    expect(generator.meta.framework).toBe("express");
+  });
+
+  it("generates all required files", () => {
+    const source = `
+@backend(express)
+module test.api
+
+type TaskId = UUID
+intent route GetTask { input: { id: TaskId } output: String }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const generator = new ExpressGenerator();
+    const context: GeneratorContext = {
+      ir,
+      config: { outputDir: "./out" },
+      targetModules: Array.from(ir.modules.values()),
+    };
+
+    const output = generator.generate(context);
+
+    const filePaths = output.files.map((f) => f.path);
+    expect(filePaths).toContain("src/types.ts");
+    expect(filePaths).toContain("src/routes/handlers.ts");
+    expect(filePaths).toContain("src/routes/index.ts");
+    // Project files should be generated by default
+    expect(filePaths).toContain("package.json");
+    expect(filePaths).toContain("tsconfig.json");
+    expect(filePaths).toContain("src/index.ts");
+  });
+
+  it("can skip project files", () => {
+    const source = `
+@backend(express)
+module test.api
+intent route GetTask { input: { id: UUID } output: String }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const generator = new ExpressGenerator({ includeProjectFiles: false });
+    const context: GeneratorContext = {
+      ir,
+      config: { outputDir: "./out" },
+      targetModules: Array.from(ir.modules.values()),
+    };
+
+    const output = generator.generate(context);
+
+    const filePaths = output.files.map((f) => f.path);
+    expect(filePaths).not.toContain("package.json");
+    expect(filePaths).not.toContain("tsconfig.json");
+    expect(filePaths).not.toContain("src/index.ts");
+  });
+
+  it("includes correct dependencies", () => {
+    const source = `
+@backend(express)
+module test.api
+intent route GetTask { input: { id: UUID } output: String }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const generator = new ExpressGenerator();
+    const context: GeneratorContext = {
+      ir,
+      config: { outputDir: "./out" },
+      targetModules: Array.from(ir.modules.values()),
+    };
+
+    const output = generator.generate(context);
+
+    expect(output.dependencies).toHaveProperty("express");
+    expect(output.dependencies).toHaveProperty("cors");
+    expect(output.devDependencies).toHaveProperty("@types/express");
+    expect(output.devDependencies).toHaveProperty("tsx");
+  });
+});
+
+describe("ReactGenerator", () => {
+  it("has correct metadata", () => {
+    const generator = new ReactGenerator();
+
+    expect(generator.meta.id).toBe("typescript:react");
+    expect(generator.meta.target).toBe("frontend");
+    expect(generator.meta.framework).toBe("react");
+  });
+
+  it("generates all required files", () => {
+    const source = `
+@frontend(react)
+module test.api
+intent route GetTask { input: { id: UUID } output: String }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const generator = new ReactGenerator();
+    const context: GeneratorContext = {
+      ir,
+      config: { outputDir: "./out" },
+      targetModules: Array.from(ir.modules.values()),
+    };
+
+    const output = generator.generate(context);
+
+    const filePaths = output.files.map((f) => f.path);
+    expect(filePaths).toContain("src/types.ts");
+    expect(filePaths).toContain("src/api/client.ts");
+    expect(filePaths).toContain("src/hooks/index.ts");
+    // Project files should be generated by default
+    expect(filePaths).toContain("package.json");
+    expect(filePaths).toContain("tsconfig.json");
+    expect(filePaths).toContain("vite.config.ts");
+    expect(filePaths).toContain("index.html");
+    expect(filePaths).toContain("src/main.tsx");
+    expect(filePaths).toContain("src/App.tsx");
+  });
+
+  it("can skip project files", () => {
+    const source = `
+@frontend(react)
+module test.api
+intent route GetTask { input: { id: UUID } output: String }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const generator = new ReactGenerator({ includeProjectFiles: false });
+    const context: GeneratorContext = {
+      ir,
+      config: { outputDir: "./out" },
+      targetModules: Array.from(ir.modules.values()),
+    };
+
+    const output = generator.generate(context);
+
+    const filePaths = output.files.map((f) => f.path);
+    expect(filePaths).not.toContain("package.json");
+    expect(filePaths).not.toContain("vite.config.ts");
+    expect(filePaths).not.toContain("src/main.tsx");
+  });
+
+  it("includes correct dependencies", () => {
+    const source = `
+@frontend(react)
+module test.api
+intent route GetTask { input: { id: UUID } output: String }
+`;
+    const { program } = parseTandem(source);
+    const { ir } = compileToIR(program);
+    const generator = new ReactGenerator();
+    const context: GeneratorContext = {
+      ir,
+      config: { outputDir: "./out" },
+      targetModules: Array.from(ir.modules.values()),
+    };
+
+    const output = generator.generate(context);
+
+    expect(output.dependencies).toHaveProperty("@tanstack/react-query");
+  });
+});
+
+// =============================================================================
+// Registry Integration Tests
+// =============================================================================
+
+describe("Generator Registration", () => {
+  it("registers all generators", () => {
+    // Clear and re-register to test
+    generatorRegistry.clear();
+    registerAllGenerators();
+
+    expect(generatorRegistry.has("typescript:types")).toBe(true);
+    expect(generatorRegistry.has("typescript:express")).toBe(true);
+    expect(generatorRegistry.has("typescript:react")).toBe(true);
+  });
+
+  it("can find generator by annotation", () => {
+    generatorRegistry.clear();
+    registerAllGenerators();
+
+    const express = generatorRegistry.findByAnnotation("backend", "express", "typescript");
+    const react = generatorRegistry.findByAnnotation("frontend", "react", "typescript");
+
+    expect(express).toBeDefined();
+    expect(express?.meta.id).toBe("typescript:express");
+
+    expect(react).toBeDefined();
+    expect(react?.meta.id).toBe("typescript:react");
+  });
+});
+
+// =============================================================================
+// Full Stack Integration Test
+// =============================================================================
+
+describe("Full Stack Generation (sample-fullstack.tdm)", () => {
+  const fullstackPath = path.resolve(__dirname, "../../samples/sample-fullstack.tdm");
+
+  it("generates complete output for fullstack sample", () => {
+    const source = fs.readFileSync(fullstackPath, "utf-8");
+    const { program } = parseTandem(source);
+    const { ir, diagnostics } = compileToIR(program);
+
+    expect(diagnostics).toEqual([]);
+
+    // Test TypesGenerator
+    const typesGen = new TypesGenerator();
+    const typesOutput = typesGen.generate({
+      ir,
+      config: { outputDir: "./out" },
+      targetModules: Array.from(ir.modules.values()),
+    });
+
+    expect(typesOutput.files[0].content).toContain("export type TaskId");
+    expect(typesOutput.files[0].content).toContain("export interface Task");
+    expect(typesOutput.files[0].content).toContain("export interface ListTasksInput");
+    expect(typesOutput.files[0].content).toContain("export type GetTaskOutput");
+
+    // Test ExpressGenerator
+    const expressGen = new ExpressGenerator();
+    const expressOutput = expressGen.generate({
+      ir,
+      config: { outputDir: "./out" },
+      targetModules: Array.from(ir.modules.values()),
+    });
+
+    const handlersFile = expressOutput.files.find((f) => f.path.includes("handlers"));
+    expect(handlersFile?.content).toContain("listTasksHandler");
+    expect(handlersFile?.content).toContain("getTaskHandler");
+    expect(handlersFile?.content).toContain("createTaskHandler");
+    expect(handlersFile?.content).toContain("deleteTaskHandler");
+
+    // Test ReactGenerator
+    const reactGen = new ReactGenerator();
+    const reactOutput = reactGen.generate({
+      ir,
+      config: { outputDir: "./out" },
+      targetModules: Array.from(ir.modules.values()),
+    });
+
+    const hooksFile = reactOutput.files.find((f) => f.path.includes("hooks"));
+    expect(hooksFile?.content).toContain("useListTasks");
+    expect(hooksFile?.content).toContain("useGetTask");
+    expect(hooksFile?.content).toContain("useCreateTask");
+    expect(hooksFile?.content).toContain("useDeleteTask");
+
+    const clientFile = reactOutput.files.find((f) => f.path.includes("client"));
+    expect(clientFile?.content).toContain("listTasks:");
+    expect(clientFile?.content).toContain("getTask:");
+    expect(clientFile?.content).toContain("createTask:");
   });
 });

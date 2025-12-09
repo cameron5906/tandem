@@ -66,11 +66,35 @@ export interface IRModule {
   annotations: IRAnnotation[];
 }
 
+// Component element types for semantic UI descriptions
+export type IRComponentElement =
+  | "card"
+  | "form"
+  | "list"
+  | "table"
+  | "modal"
+  | "button"
+  | "detail"
+  | "dashboard";
+
+// IRComponent represents a compiled component declaration
+export interface IRComponent {
+  name: string; // Fully qualified name: "app.users.UserCard"
+  element: IRComponentElement;
+  displays?: IRTypeRef;
+  binds?: string; // FQN of bound intent
+  actions?: string[]; // FQNs of action intents
+  itemComponent?: string; // FQN of item component
+  emptyState?: string;
+  spec?: string;
+}
+
 // TandemIR is the complete intermediate representation
 export interface TandemIR {
   modules: Map<string, IRModule>; // Key: fully qualified name
   types: Map<string, IRType>; // Key: fully qualified name
   intents: Map<string, IRIntent>; // Key: fully qualified name
+  components: Map<string, IRComponent>; // Key: fully qualified name
 }
 
 // Create an empty IR
@@ -79,5 +103,6 @@ export function createEmptyIR(): TandemIR {
     modules: new Map(),
     types: new Map(),
     intents: new Map(),
+    components: new Map(),
   };
 }

@@ -34,4 +34,7 @@ export const
   RBrace = 32,
   IntentDecl = 33,
   IntentBodyProperty = 34,
-  ObjectType = 35
+  ObjectType = 35,
+  ComponentDecl = 36,
+  ComponentBodyProperty = 37,
+  IdentifierList = 38

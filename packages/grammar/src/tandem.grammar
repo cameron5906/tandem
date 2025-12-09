@@ -1,4 +1,4 @@
-@top Program { (ModuleDecl | TypeDecl | IntentDecl)* }
+@top Program { (ModuleDecl | TypeDecl | IntentDecl | ComponentDecl)* }
 
 @tokens {
   whitespace { @whitespace+ }
@@ -26,6 +26,13 @@
   input { "input" }
   output { "output" }
   spec { "spec" }
+  component { "component" }
+  element { "element" }
+  displays { "displays" }
+  binds { "binds" }
+  actions { "actions" }
+  itemComponent { "itemComponent" }
+  emptyState { "emptyState" }
 }
 
 @skip { whitespace | LineComment }
@@ -84,3 +91,22 @@ IntentBodyProperty {
 }
 
 ObjectType { LBrace FieldDecl* RBrace }
+
+// Component declarations for frontend UI
+ComponentDecl {
+  component Identifier LBrace
+    ComponentBodyProperty*
+  RBrace
+}
+
+ComponentBodyProperty {
+  (element Colon Identifier) |
+  (displays Colon TypeRef) |
+  (binds Colon QualifiedIdentifier) |
+  (actions Colon IdentifierList) |
+  (itemComponent Colon QualifiedIdentifier) |
+  (emptyState Colon String) |
+  (spec Colon String)
+}
+
+IdentifierList { LBracket QualifiedIdentifier (Comma QualifiedIdentifier)* RBracket }

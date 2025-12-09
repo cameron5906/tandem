@@ -420,3 +420,476 @@ type UserId = UUID
     expect(module?.annotations[1].value).toBe("react");
   });
 });
+
+describe("Component Declarations", () => {
+  describe("Parsing", () => {
+    it("parses a simple card component", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+type User {
+  id: UUID
+  name: String
+}
+
+component UserCard {
+  element: card
+  displays: User
+  spec: "Displays user information"
+}
+`;
+      const { program, diagnostics } = parseTandem(source);
+
+      expect(diagnostics).toEqual([]);
+      expect(program.components).toHaveLength(1);
+
+      const component = program.components[0];
+      expect(component.name).toBe("UserCard");
+      expect(component.element).toBe("card");
+      expect(component.displays?.kind).toBe("simple");
+      if (component.displays?.kind === "simple") {
+        expect(component.displays.name).toBe("User");
+      }
+      expect(component.spec).toBe("Displays user information");
+    });
+
+    it("parses a form component with binds", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+intent route CreateUser {
+  input: { name: String }
+  output: Bool
+  spec: "Create user"
+}
+
+component CreateUserForm {
+  element: form
+  binds: CreateUser
+  spec: "Form to create a new user"
+}
+`;
+      const { program, diagnostics } = parseTandem(source);
+
+      expect(diagnostics).toEqual([]);
+      expect(program.components).toHaveLength(1);
+
+      const component = program.components[0];
+      expect(component.name).toBe("CreateUserForm");
+      expect(component.element).toBe("form");
+      expect(component.binds).toBe("CreateUser");
+      expect(component.spec).toBe("Form to create a new user");
+    });
+
+    it("parses a list component with itemComponent and emptyState", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+type User {
+  id: UUID
+  name: String
+}
+
+component UserCard {
+  element: card
+  displays: User
+}
+
+component UserList {
+  element: list
+  displays: List<User>
+  itemComponent: UserCard
+  emptyState: "No users found"
+  spec: "List of all users"
+}
+`;
+      const { program, diagnostics } = parseTandem(source);
+
+      expect(diagnostics).toEqual([]);
+      expect(program.components).toHaveLength(2);
+
+      const listComponent = program.components[1];
+      expect(listComponent.name).toBe("UserList");
+      expect(listComponent.element).toBe("list");
+      expect(listComponent.displays?.kind).toBe("generic");
+      if (listComponent.displays?.kind === "generic") {
+        expect(listComponent.displays.name).toBe("List");
+      }
+      expect(listComponent.itemComponent).toBe("UserCard");
+      expect(listComponent.emptyState).toBe("No users found");
+    });
+
+    it("parses a component with actions array", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+type User {
+  id: UUID
+  name: String
+}
+
+intent route EditUser {
+  input: { id: UUID }
+  output: User
+}
+
+intent route DeleteUser {
+  input: { id: UUID }
+  output: Bool
+}
+
+component UserCard {
+  element: card
+  displays: User
+  actions: [EditUser, DeleteUser]
+}
+`;
+      const { program, diagnostics } = parseTandem(source);
+
+      expect(diagnostics).toEqual([]);
+      expect(program.components).toHaveLength(1);
+
+      const component = program.components[0];
+      expect(component.actions).toEqual(["EditUser", "DeleteUser"]);
+    });
+
+    it("parses all component element types", () => {
+      const source = `
+@frontend(react)
+module app.ui
+
+type Data { id: UUID }
+
+component CardComp { element: card displays: Data }
+component FormComp { element: form binds: SomeIntent }
+component ListComp { element: list displays: List<Data> }
+component TableComp { element: table displays: List<Data> }
+component ModalComp { element: modal displays: Data }
+component ButtonComp { element: button }
+component DetailComp { element: detail displays: Data }
+component DashboardComp { element: dashboard }
+
+intent route SomeIntent {
+  input: { id: UUID }
+  output: Bool
+}
+`;
+      const { program, diagnostics } = parseTandem(source);
+
+      expect(diagnostics).toEqual([]);
+      expect(program.components).toHaveLength(8);
+
+      const elements = program.components.map((c) => c.element);
+      expect(elements).toContain("card");
+      expect(elements).toContain("form");
+      expect(elements).toContain("list");
+      expect(elements).toContain("table");
+      expect(elements).toContain("modal");
+      expect(elements).toContain("button");
+      expect(elements).toContain("detail");
+      expect(elements).toContain("dashboard");
+    });
+  });
+
+  describe("Compilation to IR", () => {
+    it("compiles components to IR with fully qualified names", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+type User {
+  id: UUID
+  name: String
+}
+
+intent route GetUser {
+  input: { id: UUID }
+  output: User
+}
+
+component UserCard {
+  element: card
+  displays: User
+  actions: [GetUser]
+  spec: "User card component"
+}
+`;
+      const { program } = parseTandem(source);
+      const { ir, diagnostics } = compileToIR(program);
+
+      expect(diagnostics).toEqual([]);
+      expect(ir.components.size).toBe(1);
+      expect(ir.components.has("app.users.UserCard")).toBe(true);
+
+      const component = ir.components.get("app.users.UserCard");
+      expect(component?.name).toBe("app.users.UserCard");
+      expect(component?.element).toBe("card");
+      expect(component?.spec).toBe("User card component");
+
+      // Check resolved displays type
+      expect(component?.displays?.kind).toBe("simple");
+      if (component?.displays?.kind === "simple") {
+        expect(component.displays.fqn).toBe("app.users.User");
+      }
+
+      // Check resolved actions
+      expect(component?.actions).toEqual(["app.users.GetUser"]);
+    });
+
+    it("resolves generic types in displays", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+type User {
+  id: UUID
+}
+
+component UserList {
+  element: list
+  displays: List<User>
+}
+`;
+      const { program } = parseTandem(source);
+      const { ir, diagnostics } = compileToIR(program);
+
+      expect(diagnostics).toEqual([]);
+
+      const component = ir.components.get("app.users.UserList");
+      expect(component?.displays?.kind).toBe("generic");
+      if (component?.displays?.kind === "generic") {
+        expect(component.displays.name).toBe("List");
+        expect(component.displays.typeArgs[0].kind).toBe("simple");
+        if (component.displays.typeArgs[0].kind === "simple") {
+          expect(component.displays.typeArgs[0].fqn).toBe("app.users.User");
+        }
+      }
+    });
+
+    it("resolves binds to intent FQN", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+intent route CreateUser {
+  input: { name: String }
+  output: Bool
+}
+
+component CreateForm {
+  element: form
+  binds: CreateUser
+}
+`;
+      const { program } = parseTandem(source);
+      const { ir, diagnostics } = compileToIR(program);
+
+      expect(diagnostics).toEqual([]);
+
+      const component = ir.components.get("app.users.CreateForm");
+      expect(component?.binds).toBe("app.users.CreateUser");
+    });
+
+    it("resolves itemComponent to FQN", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+type User { id: UUID }
+
+component UserCard {
+  element: card
+  displays: User
+}
+
+component UserList {
+  element: list
+  displays: List<User>
+  itemComponent: UserCard
+}
+`;
+      const { program } = parseTandem(source);
+      const { ir, diagnostics } = compileToIR(program);
+
+      expect(diagnostics).toEqual([]);
+
+      const listComponent = ir.components.get("app.users.UserList");
+      expect(listComponent?.itemComponent).toBe("app.users.UserCard");
+    });
+  });
+
+  describe("Validation", () => {
+    it("rejects components in non-frontend modules", () => {
+      const source = `
+@backend(express)
+module api.users
+
+type User { id: UUID }
+
+component UserCard {
+  element: card
+  displays: User
+}
+`;
+      const { program } = parseTandem(source);
+      const { diagnostics } = compileToIR(program);
+
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(
+        diagnostics.some((d) =>
+          d.message.includes("can only be declared in @frontend modules")
+        )
+      ).toBe(true);
+    });
+
+    it("rejects components in modules without annotations", () => {
+      const source = `
+module api.users
+
+type User { id: UUID }
+
+component UserCard {
+  element: card
+  displays: User
+}
+`;
+      const { program } = parseTandem(source);
+      const { diagnostics } = compileToIR(program);
+
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(
+        diagnostics.some((d) =>
+          d.message.includes("can only be declared in @frontend modules")
+        )
+      ).toBe(true);
+    });
+
+    it("reports error for form component without binds", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+component CreateForm {
+  element: form
+  spec: "Missing binds property"
+}
+`;
+      const { program } = parseTandem(source);
+      const { diagnostics } = compileToIR(program);
+
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(
+        diagnostics.some((d) => d.message.includes("must have a 'binds' property"))
+      ).toBe(true);
+    });
+
+    it("reports error for list component without displays", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+component UserList {
+  element: list
+  emptyState: "No users"
+}
+`;
+      const { program } = parseTandem(source);
+      const { diagnostics } = compileToIR(program);
+
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(
+        diagnostics.some((d) => d.message.includes("must have a 'displays' property"))
+      ).toBe(true);
+    });
+
+    it("reports error for card component without displays", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+component UserCard {
+  element: card
+  spec: "Missing displays"
+}
+`;
+      const { program } = parseTandem(source);
+      const { diagnostics } = compileToIR(program);
+
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(
+        diagnostics.some((d) => d.message.includes("must have a 'displays' property"))
+      ).toBe(true);
+    });
+
+    it("reports error for unresolved intent in binds", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+component CreateForm {
+  element: form
+  binds: NonExistentIntent
+}
+`;
+      const { program } = parseTandem(source);
+      const { diagnostics } = compileToIR(program);
+
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(
+        diagnostics.some((d) => d.message.includes("Cannot resolve intent reference"))
+      ).toBe(true);
+    });
+
+    it("reports error for unresolved intent in actions", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+type User { id: UUID }
+
+component UserCard {
+  element: card
+  displays: User
+  actions: [NonExistentAction]
+}
+`;
+      const { program } = parseTandem(source);
+      const { diagnostics } = compileToIR(program);
+
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(
+        diagnostics.some((d) => d.message.includes("Cannot resolve intent reference"))
+      ).toBe(true);
+    });
+
+    it("reports error for duplicate component declarations", () => {
+      const source = `
+@frontend(react)
+module app.users
+
+type User { id: UUID }
+
+component UserCard {
+  element: card
+  displays: User
+}
+
+component UserCard {
+  element: detail
+  displays: User
+}
+`;
+      const { program } = parseTandem(source);
+      const { diagnostics } = compileToIR(program);
+
+      expect(diagnostics.length).toBeGreaterThan(0);
+      expect(
+        diagnostics.some((d) => d.message.includes("Duplicate component declaration"))
+      ).toBe(true);
+    });
+  });
+});

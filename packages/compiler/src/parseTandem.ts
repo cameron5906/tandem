@@ -12,6 +12,8 @@ import {
   OptionalTypeRefNode,
   ArrayTypeRefNode,
   AnnotationNode,
+  ComponentDeclNode,
+  ComponentElementType,
 } from "./ast";
 import { parser } from "@tandem-lang/grammar";
 import { Diagnostic } from "./diagnostics";
@@ -43,6 +45,7 @@ class Walker {
       modules: [],
       types: [],
       intents: [],
+      components: [],
     };
 
     do {
@@ -55,6 +58,9 @@ class Walker {
           break;
         case "IntentDecl":
           program.intents.push(this.walkIntentDecl());
+          break;
+        case "ComponentDecl":
+          program.components.push(this.walkComponentDecl());
           break;
       }
     } while (this.cursor.nextSibling());
@@ -208,6 +214,131 @@ class Walker {
       spec,
       span: { from, to },
     };
+  }
+
+  walkComponentDecl(): ComponentDeclNode {
+    const from = this.cursor.from,
+      to = this.cursor.to;
+
+    this.cursor.firstChild(); // Enter ComponentDecl -> Identifier (component name)
+    // Note: "component" keyword is anonymous, so first named child is Identifier
+
+    const name = this.getText();
+
+    let element: ComponentElementType | undefined;
+    let displays: TypeRefNode | undefined;
+    let binds: string | undefined;
+    let actions: string[] | undefined;
+    let itemComponent: string | undefined;
+    let emptyState: string | undefined;
+    let spec: string | undefined;
+
+    this.cursor.nextSibling(); // -> LBrace
+
+    // From LBrace, loop through siblings until RBrace
+    while (this.cursor.nextSibling() && this.cursor.name !== "RBrace") {
+      // We are on a ComponentBodyProperty, enter it
+      this.cursor.firstChild();
+
+      // ComponentBodyProperty structure: (keyword Colon Value)
+      // Keywords are anonymous, so we need to look at what type of value node we find
+      // and use the source text of the property to determine which property it is
+
+      // Get the full property text to determine which property this is
+      const propertyText = this.source.slice(this.cursor.from - 20, this.cursor.to + 20);
+
+      // Move through the children looking for the value
+      let found = false;
+      do {
+        const nodeName = this.cursor.name;
+        switch (nodeName) {
+          case "Identifier":
+            // Could be element value (like "card") - check by looking backward for keyword
+            if (!found) {
+              // Check if this is after "element:" by looking at the property text
+              const textBefore = this.source.slice(this.cursor.from - 10, this.cursor.from);
+              if (textBefore.includes("element")) {
+                element = this.getText() as ComponentElementType;
+                found = true;
+              }
+            }
+            break;
+          case "TypeRef":
+            // This is the displays property
+            displays = this.walkTypeRef();
+            found = true;
+            break;
+          case "QualifiedIdentifier":
+            // Could be binds or itemComponent
+            {
+              const textBefore = this.source.slice(this.cursor.from - 20, this.cursor.from);
+              if (textBefore.includes("binds")) {
+                binds = this.getText();
+              } else if (textBefore.includes("itemComponent")) {
+                itemComponent = this.getText();
+              }
+              found = true;
+            }
+            break;
+          case "IdentifierList":
+            // This is the actions property
+            actions = this.walkIdentifierList();
+            found = true;
+            break;
+          case "String":
+            // Could be emptyState or spec
+            {
+              const textBefore = this.source.slice(this.cursor.from - 15, this.cursor.from);
+              const value = this.getText().slice(1, -1); // Strip quotes
+              if (textBefore.includes("emptyState")) {
+                emptyState = value;
+              } else if (textBefore.includes("spec")) {
+                spec = value;
+              }
+              found = true;
+            }
+            break;
+        }
+        if (found) break;
+      } while (this.cursor.nextSibling());
+
+      this.cursor.parent(); // Exit ComponentBodyProperty
+    }
+
+    this.cursor.parent(); // Exit ComponentDecl
+
+    if (!element) {
+      throw new Error(`Component '${name}' must have an element type`);
+    }
+
+    return {
+      name,
+      element,
+      displays,
+      binds,
+      actions,
+      itemComponent,
+      emptyState,
+      spec,
+      span: { from, to },
+    };
+  }
+
+  walkIdentifierList(): string[] {
+    const ids: string[] = [];
+
+    this.cursor.firstChild(); // Enter IdentifierList -> LBracket
+
+    while (this.cursor.nextSibling() && this.cursor.name !== "RBracket") {
+      if (this.cursor.name === "QualifiedIdentifier") {
+        ids.push(this.getText());
+      }
+      // Skip Comma tokens
+    }
+
+    this.cursor.parent(); // Exit IdentifierList
+
+    return ids;
   }
 
   walkObjectType(): ObjectTypeNode {

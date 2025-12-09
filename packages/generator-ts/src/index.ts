@@ -9,8 +9,14 @@ export * from "./interfaces";
 export * from "./mappers";
 export * from "./emitters";
 
+// Re-export generators
+export * from "./generators";
+
 // Re-export utilities
-export { shorten } from "./utils/naming";
+export * from "./utils";
+
+// Re-export registration
+export { registerAllGenerators, getTypeScriptGenerators } from "./register";
 
 /**
  * Generate TypeScript code from Tandem IR.
