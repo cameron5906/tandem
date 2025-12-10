@@ -5,6 +5,7 @@ import {
   IntentDeclNode,
   TypeRefNode,
   ComponentDeclNode,
+  ModuleNode,
 } from "./ast";
 import {
   TandemIR,
@@ -23,10 +24,18 @@ import {
   isGenericType,
   getExpectedTypeParams,
 } from "./types";
+import { ANNOTATIONS } from "./languageMetadata";
 
 export interface CompileResult {
   ir: TandemIR;
   diagnostics: Diagnostic[];
+}
+
+const ANNOTATION_ALLOWED_MAP: Record<string, string[]> = {};
+for (const annotation of ANNOTATIONS) {
+  if (annotation.allowedValues) {
+    ANNOTATION_ALLOWED_MAP[annotation.name] = annotation.allowedValues;
+  }
 }
 
 class Compiler {
@@ -46,6 +55,8 @@ class Compiler {
     if (this.program.modules.length > 0) {
       const module = this.program.modules[0];
       this.currentModule = module.name;
+
+      this.validateModuleAnnotations(module);
 
       // Register module with its annotations
       this.ir.modules.set(module.name, {
@@ -237,6 +248,23 @@ class Compiler {
       to: span.to,
     });
     return undefined;
+  }
+
+  private validateModuleAnnotations(module: ModuleNode) {
+    for (const annotation of module.annotations) {
+      const allowed = ANNOTATION_ALLOWED_MAP[annotation.name];
+      if (annotation.value && allowed && !allowed.includes(annotation.value)) {
+        this.diagnostics.push({
+          message: `Invalid ${annotation.name} annotation value '${annotation.value}'. Expected one of: ${allowed.join(
+            ", "
+          )}`,
+          from: annotation.span.from,
+          to: annotation.span.to,
+          severity: "error",
+          code: `invalid-${annotation.name}-annotation`,
+        });
+      }
+    }
   }
 
   private validateComponentSemantics(component: ComponentDeclNode, fqn: string) {

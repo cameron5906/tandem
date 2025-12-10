@@ -150,13 +150,17 @@ export function getBuiltinType(name: string): BuiltinTypeInfo | undefined {
   return ALL_BUILTIN_TYPES[name];
 }
 
-export function getExpectedTypeParams(name: string): number {
-  const info = GENERIC_TYPES[name];
-  return info?.typeParams ?? 0;
-}
-
 // List of all primitive type names for reference
 export const PRIMITIVE_TYPE_NAMES = Object.keys(PRIMITIVE_TYPES);
 
 // List of all generic type names for reference
 export const GENERIC_TYPE_NAMES = Object.keys(GENERIC_TYPES);
+
+export function getExpectedTypeParams(name: string): number {
+  const info = GENERIC_TYPES[name];
+  return info?.typeParams ?? 0;
+}
+
+// Full lists exported for downstream tooling (LSP/tests/etc.)
+export const SUPPORTED_PRIMITIVES = PRIMITIVE_TYPE_NAMES;
+export const SUPPORTED_GENERICS = GENERIC_TYPE_NAMES;

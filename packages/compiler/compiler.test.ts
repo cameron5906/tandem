@@ -398,6 +398,7 @@ type UserId = UUID
     const source = `
 @backend(express)
 @frontend(react)
+@version("2.0")
 module api.users
 
 type UserId = UUID
@@ -411,13 +412,48 @@ type UserId = UUID
     const module = ir.modules.get("api.users");
     expect(module).toBeDefined();
     expect(module?.name).toBe("api.users");
-    expect(module?.annotations).toHaveLength(2);
+    expect(module?.annotations).toHaveLength(3);
 
     expect(module?.annotations[0].name).toBe("backend");
     expect(module?.annotations[0].value).toBe("express");
 
     expect(module?.annotations[1].name).toBe("frontend");
     expect(module?.annotations[1].value).toBe("react");
+
+    expect(module?.annotations[2].name).toBe("version");
+    expect(module?.annotations[2].value).toBe("2.0");
+  });
+
+  it("reports invalid backend annotation values", () => {
+    const source = `
+@backend(rails)
+module api.users
+`;
+    const { program } = parseTandem(source);
+    const { diagnostics } = compileToIR(program);
+
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(
+      diagnostics.some((d) =>
+        d.message.includes("Invalid backend annotation value 'rails'")
+      )
+    ).toBe(true);
+  });
+
+  it("reports invalid frontend annotation values", () => {
+    const source = `
+@frontend(angular)
+module app.ui
+`;
+    const { program } = parseTandem(source);
+    const { diagnostics } = compileToIR(program);
+
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(
+      diagnostics.some((d) =>
+        d.message.includes("Invalid frontend annotation value 'angular'")
+      )
+    ).toBe(true);
   });
 });
 
