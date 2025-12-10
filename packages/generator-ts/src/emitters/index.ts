@@ -1,8 +1,8 @@
 export { TypeDeclarationEmitter, TypeDeclarationEmitterOptions } from "./TypeDeclarationEmitter";
-export { ExpressRouteEmitter } from "./ExpressRouteEmitter";
+export { ExpressRouteEmitter, ExpressRouteEmitterConfig } from "./ExpressRouteEmitter";
 export { ApiClientEmitter, ApiClientEmitterOptions } from "./ApiClientEmitter";
 export { ReactHooksEmitter } from "./ReactHooksEmitter";
-export { ComponentEmitter } from "./ComponentEmitter";
+export { ComponentEmitter, ComponentEmitterConfig } from "./ComponentEmitter";
 
 // Project file emitters
 export * from "./project";

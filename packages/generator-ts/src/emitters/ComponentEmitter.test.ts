@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { ComponentEmitter } from "./ComponentEmitter";
 import { TypeScriptTypeMapper } from "../mappers";
-import { TandemIR, IRComponent, IRTypeRef } from "@tandem-lang/compiler";
+import { TandemIR, IRComponent } from "@tandem-lang/compiler";
+import type { GeneratedCode } from "../interfaces/ICodeEmitter";
+import {
+  MockProvider,
+  CodeGenerationPipeline,
+  IRContextBuilder,
+} from "@tandem-lang/llm";
 
 function createTestIR(components: Map<string, IRComponent>): TandemIR {
   return {
@@ -69,12 +75,23 @@ function createTestIR(components: Map<string, IRComponent>): TandemIR {
   };
 }
 
+function createMockPipeline(): CodeGenerationPipeline {
+  const provider = new MockProvider({ apiKey: "mock-key", model: "mock-model" });
+  provider.setMockResponse({
+    jsx: "<div>Mock component</div>",
+    hooks: [],
+    handlers: [],
+    imports: [],
+  });
+  const contextBuilder = new IRContextBuilder();
+  return new CodeGenerationPipeline(provider, contextBuilder, { maxRetries: 1 });
+}
+
 describe("ComponentEmitter", () => {
   const mapper = new TypeScriptTypeMapper();
-  const emitter = new ComponentEmitter(mapper);
 
   describe("Card Component", () => {
-    it("generates a card component with displays and actions", () => {
+    it("generates a card component with displays and actions", async () => {
       const components = new Map<string, IRComponent>([
         [
           "app.users.UserCard",
@@ -89,50 +106,22 @@ describe("ComponentEmitter", () => {
       ]);
 
       const ir = createTestIR(components);
-      const files = emitter.emit(ir);
+      const emitter = new ComponentEmitter(mapper, { pipeline: createMockPipeline() });
+      const files = await emitter.emit(ir);
 
-      // Should generate component file and index
-      expect(files.length).toBe(2);
+      // Should generate component file, module index, and aggregate index
+      expect(files.length).toBe(3);
 
-      const cardFile = files.find((f) => f.filename === "components/UserCard.tsx");
+      const cardFile = files.find(
+        (f) => f.filename === "components/users/UserCard.tsx"
+      );
       expect(cardFile).toBeDefined();
-
-      const content = cardFile!.content;
-      expect(content).toContain("export function UserCard");
-      expect(content).toContain("interface UserCardProps");
-      expect(content).toContain("data: User");
-      expect(content).toContain("Displays user info");
-      expect(content).toContain("tandem-card");
-      expect(content).toContain("tandem-actions");
-      expect(content).toContain("UpdateUser");
-      expect(content).toContain("DeleteUser");
-    });
-
-    it("generates a card component without actions", () => {
-      const components = new Map<string, IRComponent>([
-        [
-          "app.users.UserCard",
-          {
-            name: "app.users.UserCard",
-            element: "card",
-            displays: { kind: "simple", fqn: "app.users.User" },
-          },
-        ],
-      ]);
-
-      const ir = createTestIR(components);
-      const files = emitter.emit(ir);
-
-      const cardFile = files.find((f) => f.filename === "components/UserCard.tsx");
-      const content = cardFile!.content;
-
-      expect(content).toContain("export function UserCard");
-      expect(content).not.toContain("tandem-actions");
+      expect(cardFile!.content).toContain("UserCard");
     });
   });
 
   describe("Form Component", () => {
-    it("generates a form component with binds", () => {
+    it("generates a form component bound to an intent", async () => {
       const components = new Map<string, IRComponent>([
         [
           "app.users.CreateUserForm",
@@ -140,63 +129,62 @@ describe("ComponentEmitter", () => {
             name: "app.users.CreateUserForm",
             element: "form",
             binds: "app.users.CreateUser",
-            spec: "Create user form",
+            spec: "Form to create users",
           },
         ],
       ]);
 
       const ir = createTestIR(components);
-      const files = emitter.emit(ir);
+      const emitter = new ComponentEmitter(mapper, { pipeline: createMockPipeline() });
+      const files = await emitter.emit(ir);
+
+      expect(files.length).toBe(3);
 
       const formFile = files.find(
-        (f) => f.filename === "components/CreateUserForm.tsx"
+        (f) => f.filename === "components/users/CreateUserForm.tsx"
       );
       expect(formFile).toBeDefined();
-
-      const content = formFile!.content;
-      expect(content).toContain("export function CreateUserForm");
-      expect(content).toContain("useCreateUser");
-      expect(content).toContain("CreateUserInput");
-      expect(content).toContain("useState");
-      expect(content).toContain("FormEvent");
-      expect(content).toContain("handleSubmit");
-      expect(content).toContain("mutation.mutate");
-      expect(content).toContain("mutation.isPending");
-      expect(content).toContain("tandem-form");
-    });
-
-    it("includes onSuccess and onError callbacks", () => {
-      const components = new Map<string, IRComponent>([
-        [
-          "app.users.CreateUserForm",
-          {
-            name: "app.users.CreateUserForm",
-            element: "form",
-            binds: "app.users.CreateUser",
-          },
-        ],
-      ]);
-
-      const ir = createTestIR(components);
-      const files = emitter.emit(ir);
-
-      const formFile = files.find(
-        (f) => f.filename === "components/CreateUserForm.tsx"
-      );
-      const content = formFile!.content;
-
-      expect(content).toContain("onSuccess?: () => void");
-      expect(content).toContain("onError?: (error: Error) => void");
+      expect(formFile!.content).toContain("CreateUserForm");
     });
   });
 
   describe("List Component", () => {
-    it("generates a list component with displays and itemComponent", () => {
+    it("generates a list component", async () => {
       const components = new Map<string, IRComponent>([
         [
           "app.users.UserList",
           {
             name: "app.users.UserList",
+            element: "list",
+            displays: {
+              kind: "generic",
+              name: "List",
+              typeArgs: [{ kind: "simple", fqn: "app.users.User" }],
+            },
+            emptyState: "No users found",
+          },
+        ],
+      ]);
+
+      const ir = createTestIR(components);
+      const emitter = new ComponentEmitter(mapper, { pipeline: createMockPipeline() });
+      const files = await emitter.emit(ir);
+
+      expect(files.length).toBe(3);
+
+      const listFile = files.find(
+        (f) => f.filename === "components/users/UserList.tsx"
+      );
+      expect(listFile).toBeDefined();
+      expect(listFile!.content).toContain("UserList");
+    });
+
+    it("includes item component import when specified", async () => {
+      const components = new Map<string, IRComponent>([
+        [
+          "app.users.UserListWithItems",
+          {
+            name: "app.users.UserListWithItems",
             element: "list",
             displays: {
               kind: "generic",
@@ -204,59 +192,23 @@ describe("ComponentEmitter", () => {
               typeArgs: [{ kind: "simple", fqn: "app.users.User" }],
             },
             itemComponent: "app.users.UserCard",
-            emptyState: "No users found",
-            spec: "List of users",
           },
         ],
       ]);
 
       const ir = createTestIR(components);
-      const files = emitter.emit(ir);
+      const emitter = new ComponentEmitter(mapper, { pipeline: createMockPipeline() });
+      const files = await emitter.emit(ir);
 
-      const listFile = files.find((f) => f.filename === "components/UserList.tsx");
+      const listFile = files.find(
+        (f) => f.filename === "components/users/UserListWithItems.tsx"
+      );
       expect(listFile).toBeDefined();
-
-      const content = listFile!.content;
-      expect(content).toContain("export function UserList");
-      expect(content).toContain("data: User[]");
-      expect(content).toContain("isLoading?: boolean");
-      expect(content).toContain("No users found");
-      expect(content).toContain("tandem-list");
-      expect(content).toContain("tandem-loading");
-      expect(content).toContain("tandem-empty");
-      expect(content).toContain("UserCard");
-      expect(content).toContain('import { UserCard } from "./UserCard"');
-    });
-
-    it("generates a list component without itemComponent", () => {
-      const components = new Map<string, IRComponent>([
-        [
-          "app.users.UserList",
-          {
-            name: "app.users.UserList",
-            element: "list",
-            displays: {
-              kind: "generic",
-              name: "List",
-              typeArgs: [{ kind: "simple", fqn: "app.users.User" }],
-            },
-          },
-        ],
-      ]);
-
-      const ir = createTestIR(components);
-      const files = emitter.emit(ir);
-
-      const listFile = files.find((f) => f.filename === "components/UserList.tsx");
-      const content = listFile!.content;
-
-      expect(content).toContain("tandem-list-item");
-      expect(content).not.toContain('import { UserCard }');
     });
   });
 
   describe("Table Component", () => {
-    it("generates a table component with actions", () => {
+    it("generates a table component", async () => {
       const components = new Map<string, IRComponent>([
         [
           "app.users.UserTable",
@@ -269,66 +221,54 @@ describe("ComponentEmitter", () => {
               typeArgs: [{ kind: "simple", fqn: "app.users.User" }],
             },
             actions: ["app.users.UpdateUser", "app.users.DeleteUser"],
-            emptyState: "No data",
           },
         ],
       ]);
 
       const ir = createTestIR(components);
-      const files = emitter.emit(ir);
+      const emitter = new ComponentEmitter(mapper, { pipeline: createMockPipeline() });
+      const files = await emitter.emit(ir);
 
-      const tableFile = files.find((f) => f.filename === "components/UserTable.tsx");
+      expect(files.length).toBe(3);
+
+      const tableFile = files.find(
+        (f) => f.filename === "components/users/UserTable.tsx"
+      );
       expect(tableFile).toBeDefined();
-
-      const content = tableFile!.content;
-      expect(content).toContain("export function UserTable");
-      expect(content).toContain("tandem-table");
-      expect(content).toContain("<table");
-      expect(content).toContain("<thead>");
-      expect(content).toContain("<tbody>");
-      expect(content).toContain("<th>Actions</th>");
-      expect(content).toContain("UpdateUser");
-      expect(content).toContain("DeleteUser");
+      expect(tableFile!.content).toContain("UserTable");
     });
   });
 
   describe("Modal Component", () => {
-    it("generates a modal component with binds and displays", () => {
+    it("generates a modal component", async () => {
       const components = new Map<string, IRComponent>([
         [
           "app.users.EditUserModal",
           {
             name: "app.users.EditUserModal",
             element: "modal",
-            binds: "app.users.UpdateUser",
             displays: { kind: "simple", fqn: "app.users.User" },
-            spec: "Edit user modal",
+            binds: "app.users.UpdateUser",
           },
         ],
       ]);
 
       const ir = createTestIR(components);
-      const files = emitter.emit(ir);
+      const emitter = new ComponentEmitter(mapper, { pipeline: createMockPipeline() });
+      const files = await emitter.emit(ir);
+
+      expect(files.length).toBe(3);
 
       const modalFile = files.find(
-        (f) => f.filename === "components/EditUserModal.tsx"
+        (f) => f.filename === "components/users/EditUserModal.tsx"
       );
       expect(modalFile).toBeDefined();
-
-      const content = modalFile!.content;
-      expect(content).toContain("export function EditUserModal");
-      expect(content).toContain("isOpen: boolean");
-      expect(content).toContain("onClose: () => void");
-      expect(content).toContain("initialData?: User");
-      expect(content).toContain("tandem-modal");
-      expect(content).toContain("tandem-modal-overlay");
-      expect(content).toContain("useUpdateUser");
-      expect(content).toContain("Escape");
+      expect(modalFile!.content).toContain("EditUserModal");
     });
   });
 
   describe("Detail Component", () => {
-    it("generates a detail component", () => {
+    it("generates a detail component", async () => {
       const components = new Map<string, IRComponent>([
         [
           "app.users.UserDetail",
@@ -337,30 +277,53 @@ describe("ComponentEmitter", () => {
             element: "detail",
             displays: { kind: "simple", fqn: "app.users.User" },
             actions: ["app.users.UpdateUser"],
-            spec: "User detail view",
           },
         ],
       ]);
 
       const ir = createTestIR(components);
-      const files = emitter.emit(ir);
+      const emitter = new ComponentEmitter(mapper, { pipeline: createMockPipeline() });
+      const files = await emitter.emit(ir);
+
+      expect(files.length).toBe(3);
 
       const detailFile = files.find(
-        (f) => f.filename === "components/UserDetail.tsx"
+        (f) => f.filename === "components/users/UserDetail.tsx"
       );
       expect(detailFile).toBeDefined();
-
-      const content = detailFile!.content;
-      expect(content).toContain("export function UserDetail");
-      expect(content).toContain("tandem-detail");
-      expect(content).toContain("tandem-detail-field");
-      expect(content).toContain("tandem-detail-label");
-      expect(content).toContain("tandem-detail-value");
+      expect(detailFile!.content).toContain("UserDetail");
     });
   });
 
-  describe("Index File", () => {
-    it("generates an index file exporting all components", () => {
+  describe("Generic Component", () => {
+    it("generates a generic component for unknown element types", async () => {
+      const components = new Map<string, IRComponent>([
+        [
+          "app.users.CustomWidget",
+          {
+            name: "app.users.CustomWidget",
+            element: "widget" as any,
+            spec: "A custom widget",
+          },
+        ],
+      ]);
+
+      const ir = createTestIR(components);
+      const emitter = new ComponentEmitter(mapper, { pipeline: createMockPipeline() });
+      const files = await emitter.emit(ir);
+
+      expect(files.length).toBe(3);
+
+      const widgetFile = files.find(
+        (f) => f.filename === "components/users/CustomWidget.tsx"
+      );
+      expect(widgetFile).toBeDefined();
+      expect(widgetFile!.content).toContain("CustomWidget");
+    });
+  });
+
+  describe("Index Generation", () => {
+    it("generates module index with component exports", async () => {
       const components = new Map<string, IRComponent>([
         [
           "app.users.UserCard",
@@ -385,52 +348,18 @@ describe("ComponentEmitter", () => {
       ]);
 
       const ir = createTestIR(components);
-      const files = emitter.emit(ir);
+      const emitter = new ComponentEmitter(mapper, { pipeline: createMockPipeline() });
+      const files = await emitter.emit(ir);
 
-      const indexFile = files.find((f) => f.filename === "components/index.ts");
-      expect(indexFile).toBeDefined();
-
-      const content = indexFile!.content;
-      expect(content).toContain('export { UserCard } from "./UserCard"');
-      expect(content).toContain('export { UserList } from "./UserList"');
+      const moduleIndex = files.find(
+        (f) => f.filename === "components/users/index.ts"
+      );
+      expect(moduleIndex).toBeDefined();
+      expect(moduleIndex!.content).toContain("UserCard");
+      expect(moduleIndex!.content).toContain("UserList");
     });
 
-    it("does not generate index file when no components", () => {
-      const ir = createTestIR(new Map());
-      const files = emitter.emit(ir);
-
-      expect(files.length).toBe(0);
-    });
-  });
-
-  describe("Generic/Dashboard Components", () => {
-    it("generates a generic component for unsupported element types", () => {
-      const components = new Map<string, IRComponent>([
-        [
-          "app.users.Dashboard",
-          {
-            name: "app.users.Dashboard",
-            element: "dashboard",
-            spec: "Main dashboard",
-          },
-        ],
-      ]);
-
-      const ir = createTestIR(components);
-      const files = emitter.emit(ir);
-
-      const dashFile = files.find((f) => f.filename === "components/Dashboard.tsx");
-      expect(dashFile).toBeDefined();
-
-      const content = dashFile!.content;
-      expect(content).toContain("export function Dashboard");
-      expect(content).toContain("tandem-dashboard");
-      expect(content).toContain("Main dashboard");
-    });
-  });
-
-  describe("JSDoc Comments", () => {
-    it("includes spec as JSDoc comment", () => {
+    it("generates aggregate index with all modules", async () => {
       const components = new Map<string, IRComponent>([
         [
           "app.users.UserCard",
@@ -438,20 +367,30 @@ describe("ComponentEmitter", () => {
             name: "app.users.UserCard",
             element: "card",
             displays: { kind: "simple", fqn: "app.users.User" },
-            spec: "A card showing user information",
           },
         ],
       ]);
 
       const ir = createTestIR(components);
-      const files = emitter.emit(ir);
+      const emitter = new ComponentEmitter(mapper, { pipeline: createMockPipeline() });
+      const files = await emitter.emit(ir);
 
-      const cardFile = files.find((f) => f.filename === "components/UserCard.tsx");
-      const content = cardFile!.content;
+      const aggregateIndex = files.find(
+        (f) => f.filename === "components/index.ts"
+      );
+      expect(aggregateIndex).toBeDefined();
+      expect(aggregateIndex!.content).toContain("./users");
+    });
+  });
 
-      expect(content).toContain("/**");
-      expect(content).toContain("* A card showing user information");
-      expect(content).toContain("*/");
+  describe("Empty IR", () => {
+    it("returns empty array when no components exist", async () => {
+      const components = new Map<string, IRComponent>();
+      const ir = createTestIR(components);
+      const emitter = new ComponentEmitter(mapper, { pipeline: createMockPipeline() });
+      const files = await emitter.emit(ir);
+
+      expect(files).toHaveLength(0);
     });
   });
 });

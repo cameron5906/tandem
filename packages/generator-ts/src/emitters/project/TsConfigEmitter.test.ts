@@ -36,12 +36,12 @@ describe("TsConfigEmitter", () => {
       expect(config.compilerOptions.target).toBe("ES2022");
     });
 
-    it("uses NodeNext module resolution for Node", () => {
+    it("uses bundler module resolution for Node", () => {
       const files = emitter.emit("node");
       const config = JSON.parse(files[0].content);
 
-      expect(config.compilerOptions.module).toBe("NodeNext");
-      expect(config.compilerOptions.moduleResolution).toBe("NodeNext");
+      expect(config.compilerOptions.module).toBe("ESNext");
+      expect(config.compilerOptions.moduleResolution).toBe("bundler");
     });
 
     it("includes outDir for Node", () => {

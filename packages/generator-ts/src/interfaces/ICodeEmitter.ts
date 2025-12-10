@@ -14,12 +14,14 @@ export interface GeneratedCode {
  * Strategy interface for emitting code from the Tandem IR.
  * Implement this interface to generate different types of code
  * (type declarations, route handlers, client SDKs, etc.)
+ *
+ * Emitters can be sync or async - async is used for LLM-powered generation.
  */
 export interface ICodeEmitter {
   /**
    * Emit generated code files from the Tandem IR.
    * @param ir - The complete Tandem IR
-   * @returns Array of generated code files
+   * @returns Array of generated code files (sync or async)
    */
-  emit(ir: TandemIR): GeneratedCode[];
+  emit(ir: TandemIR): GeneratedCode[] | Promise<GeneratedCode[]>;
 }

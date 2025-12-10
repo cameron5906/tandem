@@ -2,462 +2,348 @@ import { TandemIR, IRComponent, IRTypeRef } from "@tandem-lang/compiler";
 import { ICodeEmitter, GeneratedCode } from "../interfaces/ICodeEmitter";
 import { ITypeMapper } from "../interfaces/ITypeMapper";
 import { shorten, toHookName } from "../utils/naming";
+import {
+  groupByModule,
+  moduleToDirectory,
+  getRelativeImportPath,
+} from "../utils/modulePath";
+import type {
+  CodeGenerationPipeline,
+  ComponentCode,
+  PipelineProgressEvent,
+} from "@tandem-lang/llm";
+
+/**
+ * Configuration for the component emitter.
+ */
+export interface ComponentEmitterConfig {
+  /**
+   * LLM pipeline for generating component implementations.
+   */
+  pipeline: CodeGenerationPipeline;
+
+  /**
+   * Callback for progress reporting.
+   */
+  onProgress?: (event: PipelineProgressEvent) => void;
+}
 
 /**
  * Emits React component files from Tandem IR components.
  * Generates semantic UI components based on element type.
+ * Components are organized by module path.
+ * Uses LLM to generate actual component implementations.
  */
 export class ComponentEmitter implements ICodeEmitter {
-  constructor(private typeMapper: ITypeMapper) {}
+  private readonly typeMapper: ITypeMapper;
+  private readonly config: ComponentEmitterConfig;
 
-  emit(ir: TandemIR): GeneratedCode[] {
+  constructor(typeMapper: ITypeMapper, config: ComponentEmitterConfig) {
+    this.typeMapper = typeMapper;
+    this.config = config;
+  }
+
+  async emit(ir: TandemIR): Promise<GeneratedCode[]> {
+    if (ir.components.size === 0) {
+      return [];
+    }
+
+    return this.emitWithLLM(ir);
+  }
+
+  /**
+   * Emit with LLM-powered implementations.
+   */
+  private async emitWithLLM(ir: TandemIR): Promise<GeneratedCode[]> {
     const files: GeneratedCode[] = [];
 
-    for (const [fqn, component] of ir.components) {
-      const file = this.emitComponent(fqn, component, ir);
-      files.push(file);
+    // Group components by module
+    const componentsByModule = groupByModule(ir.components);
+
+    // Track exports for aggregate barrel
+    const moduleExports: Map<string, string[]> = new Map();
+
+    // Emit components for each module
+    for (const [modulePath, components] of componentsByModule) {
+      const moduleDir = this.getComponentDir(modulePath);
+      const componentNames: string[] = [];
+
+      for (const [fqn, component] of components) {
+        const name = shorten(fqn);
+        componentNames.push(name);
+
+        const file = await this.emitComponentWithLLM(
+          fqn,
+          component,
+          ir,
+          modulePath,
+        );
+        file.filename = `components/${moduleDir}/${name}.tsx`;
+        files.push(file);
+      }
+
+      // Generate per-module index
+      files.push({
+        filename: `components/${moduleDir}/index.ts`,
+        content: this.emitModuleIndex(componentNames),
+      });
+
+      moduleExports.set(moduleDir, componentNames);
     }
 
-    // Generate index file if there are components
-    if (ir.components.size > 0) {
-      files.push(this.emitIndex(ir));
-    }
+    // Generate aggregate components/index.ts
+    files.push({
+      filename: "components/index.ts",
+      content: this.emitAggregateIndex(moduleExports),
+    });
 
     return files;
   }
 
-  private emitComponent(
+  /**
+   * Emit a single component with LLM-generated content.
+   */
+  private async emitComponentWithLLM(
     fqn: string,
     component: IRComponent,
-    ir: TandemIR
+    ir: TandemIR,
+    modulePath: string,
+  ): Promise<GeneratedCode> {
+    const result = await this.config.pipeline.generateComponent(ir, fqn);
+
+    if (result.success && result.code) {
+      return this.buildComponentFile(fqn, component, result.code, modulePath);
+    } else {
+      throw new Error(`Failed to generate component ${fqn}: ${result.error || "Unknown error"}`);
+    }
+  }
+
+  /**
+   * Build component file from LLM-generated code.
+   */
+  private buildComponentFile(
+    fqn: string,
+    component: IRComponent,
+    code: ComponentCode,
+    modulePath: string,
   ): GeneratedCode {
     const name = shorten(fqn);
-
-    switch (component.element) {
-      case "form":
-        return this.emitFormComponent(name, component, ir);
-      case "card":
-        return this.emitCardComponent(name, component, ir);
-      case "list":
-        return this.emitListComponent(name, component, ir);
-      case "table":
-        return this.emitTableComponent(name, component, ir);
-      case "modal":
-        return this.emitModalComponent(name, component, ir);
-      case "detail":
-        return this.emitDetailComponent(name, component, ir);
-      default:
-        return this.emitGenericComponent(name, component);
-    }
-  }
-
-  private emitFormComponent(
-    name: string,
-    component: IRComponent,
-    ir: TandemIR
-  ): GeneratedCode {
-    const hookName = component.binds ? toHookName(component.binds) : "";
-    const inputType = component.binds
-      ? `${shorten(component.binds)}Input`
-      : "unknown";
-
-    let content = `// Generated by Tandem - DO NOT EDIT
-import { useState, FormEvent } from "react";
-${component.binds ? `import { ${hookName} } from "../hooks";\n` : ""}import { ${inputType} } from "../types";
-
-interface ${name}Props {
-  onSuccess?: () => void;
-  onError?: (error: Error) => void;
-  initialData?: Partial<${inputType}>;
-}
-
-/**
- * ${component.spec || `Form component bound to ${component.binds}`}
- */
-export function ${name}({ onSuccess, onError, initialData }: ${name}Props) {
-  const [formData, setFormData] = useState<Partial<${inputType}>>(initialData || {});
-  ${
-    component.binds
-      ? `const mutation = ${hookName}({
-    onSuccess,
-    onError,
-  });`
-      : ""
-  }
-
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    ${component.binds ? `mutation.mutate(formData as ${inputType});` : "// TODO: Handle form submission"}
-  };
-
-  const handleChange = (field: keyof ${inputType}, value: unknown) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="tandem-form">
-      {/* TODO: AI should generate form fields based on ${inputType} schema */}
-      <div className="tandem-form-fields">
-        {Object.keys(formData).map(key => (
-          <div key={key} className="tandem-form-field">
-            <label>{key}</label>
-            <input
-              type="text"
-              value={String(formData[key as keyof ${inputType}] ?? "")}
-              onChange={e => handleChange(key as keyof ${inputType}, e.target.value)}
-            />
-          </div>
-        ))}
-      </div>
-      <button type="submit" disabled={${component.binds ? "mutation.isPending" : "false"}}>
-        {${component.binds ? 'mutation.isPending ? "Submitting..." : "Submit"' : '"Submit"'}}
-      </button>
-    </form>
-  );
-}
-`;
-    return { filename: `components/${name}.tsx`, content };
-  }
-
-  private emitCardComponent(
-    name: string,
-    component: IRComponent,
-    ir: TandemIR
-  ): GeneratedCode {
     const displayType = component.displays
       ? this.typeMapper.mapType(component.displays)
-      : "unknown";
+      : undefined;
     const typeShortName = this.getTypeShortName(component.displays);
 
-    const actionHooks =
-      component.actions && component.actions.length > 0
-        ? component.actions
-            .map((a) => `import { ${toHookName(a)} } from "../hooks";`)
-            .join("\n")
-        : "";
+    const hooksPath = this.getRelativeHooksPath(modulePath);
+    const typesPath = this.getRelativeTypesPath(modulePath);
 
-    let content = `// Generated by Tandem - DO NOT EDIT
-${actionHooks ? actionHooks + "\n" : ""}import { ${typeShortName} } from "../types";
+    let content = "// Generated by Tandem with AI-powered implementations\n";
 
-interface ${name}Props {
-  data: ${displayType};
-  onAction?: (action: string, data: ${displayType}) => void;
-}
+    // Add imports
+    const imports = new Set<string>();
+    imports.add('import React from "react";');
 
-/**
- * ${component.spec || `Card displaying ${typeShortName}`}
- */
-export function ${name}({ data, onAction }: ${name}Props) {
-  return (
-    <div className="tandem-card">
-      <div className="tandem-card-content">
-        {/* TODO: AI should render fields from ${typeShortName} */}
-        <pre>{JSON.stringify(data, null, 2)}</pre>
-      </div>
-      ${this.generateActionButtons(component.actions || [], "data")}
-    </div>
-  );
-}
-`;
-    return { filename: `components/${name}.tsx`, content };
-  }
-
-  private emitListComponent(
-    name: string,
-    component: IRComponent,
-    ir: TandemIR
-  ): GeneratedCode {
-    const displayType = component.displays
-      ? this.typeMapper.mapType(component.displays)
-      : "unknown[]";
-    const itemComponent = component.itemComponent
-      ? shorten(component.itemComponent)
-      : null;
-
-    // Extract the inner type from List<T>
-    const innerType = this.extractListInnerType(component.displays);
-
-    let content = `// Generated by Tandem - DO NOT EDIT
-${itemComponent ? `import { ${itemComponent} } from "./${itemComponent}";\n` : ""}
-interface ${name}Props {
-  data: ${displayType};
-  isLoading?: boolean;
-  onAction?: (action: string, item: ${innerType}) => void;
-}
-
-/**
- * ${component.spec || `List component`}
- */
-export function ${name}({ data, isLoading, onAction }: ${name}Props) {
-  if (isLoading) {
-    return <div className="tandem-loading">Loading...</div>;
-  }
-
-  if (!data || data.length === 0) {
-    return <div className="tandem-empty">${component.emptyState || "No items found"}</div>;
-  }
-
-  return (
-    <div className="tandem-list">
-      {data.map((item, index) => (
-        ${
-          itemComponent
-            ? `<${itemComponent} key={index} data={item} onAction={(action) => onAction?.(action, item)} />`
-            : `<div key={index} className="tandem-list-item">{JSON.stringify(item)}</div>`
-        }
-      ))}
-    </div>
-  );
-}
-`;
-    return { filename: `components/${name}.tsx`, content };
-  }
-
-  private emitTableComponent(
-    name: string,
-    component: IRComponent,
-    ir: TandemIR
-  ): GeneratedCode {
-    const displayType = component.displays
-      ? this.typeMapper.mapType(component.displays)
-      : "unknown[]";
-    const innerType = this.extractListInnerType(component.displays);
-
-    let content = `// Generated by Tandem - DO NOT EDIT
-
-interface ${name}Props {
-  data: ${displayType};
-  isLoading?: boolean;
-  onAction?: (action: string, item: ${innerType}) => void;
-}
-
-/**
- * ${component.spec || `Table component`}
- */
-export function ${name}({ data, isLoading, onAction }: ${name}Props) {
-  if (isLoading) {
-    return <div className="tandem-loading">Loading...</div>;
-  }
-
-  if (!data || data.length === 0) {
-    return <div className="tandem-empty">${component.emptyState || "No items found"}</div>;
-  }
-
-  // Extract column headers from first item
-  const columns = data.length > 0 ? Object.keys(data[0] as object) : [];
-
-  return (
-    <table className="tandem-table">
-      <thead>
-        <tr>
-          {columns.map(col => (
-            <th key={col}>{col}</th>
-          ))}
-          ${(component.actions?.length || 0) > 0 ? "<th>Actions</th>" : ""}
-        </tr>
-      </thead>
-      <tbody>
-        {data.map((item, index) => (
-          <tr key={index}>
-            {columns.map(col => (
-              <td key={col}>{String((item as Record<string, unknown>)[col])}</td>
-            ))}
-            ${
-              (component.actions?.length || 0) > 0
-                ? `<td className="tandem-actions">
-              ${(component.actions || [])
-                .map(
-                  (a) =>
-                    `<button onClick={() => onAction?.("${shorten(a)}", item)}>${shorten(a)}</button>`
-                )
-                .join("\n              ")}
-            </td>`
-                : ""
-            }
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-`;
-    return { filename: `components/${name}.tsx`, content };
-  }
-
-  private emitModalComponent(
-    name: string,
-    component: IRComponent,
-    ir: TandemIR
-  ): GeneratedCode {
-    const hookName = component.binds ? toHookName(component.binds) : "";
-    const displayType = component.displays
-      ? this.typeMapper.mapType(component.displays)
-      : "unknown";
-
-    let content = `// Generated by Tandem - DO NOT EDIT
-import { useEffect } from "react";
-${component.binds ? `import { ${hookName} } from "../hooks";\n` : ""}
-interface ${name}Props {
-  isOpen: boolean;
-  onClose: () => void;
-  ${component.displays ? `initialData?: ${displayType};` : ""}
-  onSuccess?: () => void;
-}
-
-/**
- * ${component.spec || `Modal component`}
- */
-export function ${name}({ isOpen, onClose${component.displays ? ", initialData" : ""}, onSuccess }: ${name}Props) {
-  ${
-    component.binds
-      ? `const mutation = ${hookName}({
-    onSuccess: () => {
-      onSuccess?.();
-      onClose();
-    },
-  });`
-      : ""
-  }
-
-  // Close on Escape key
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    if (isOpen) {
-      document.addEventListener("keydown", handleEscape);
+    // Add React hooks imports
+    if (code.hooks?.length) {
+      const hookNames = this.extractReactHookNames(code.hooks);
+      if (hookNames.length > 0) {
+        imports.add(`import { ${hookNames.join(", ")} } from "react";`);
+      }
     }
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+    // Add custom imports from LLM
+    if (code.imports?.length) {
+      for (const imp of code.imports) {
+        imports.add(imp);
+      }
+    }
 
-  return (
-    <div className="tandem-modal-overlay" onClick={onClose}>
-      <div className="tandem-modal" onClick={e => e.stopPropagation()}>
-        <button className="tandem-modal-close" onClick={onClose}>
-          &times;
-        </button>
-        <div className="tandem-modal-content">
-          {/* TODO: AI should generate modal content */}
-          ${component.displays ? "<pre>{JSON.stringify(initialData, null, 2)}</pre>" : ""}
-        </div>
-      </div>
-    </div>
-  );
-}
-`;
-    return { filename: `components/${name}.tsx`, content };
-  }
+    // Add hook imports for bound intent or actions
+    if (component.binds) {
+      imports.add(
+        `import { ${toHookName(component.binds)} } from "${hooksPath}/hooks";`,
+      );
+    }
+    if (component.actions?.length) {
+      for (const action of component.actions) {
+        imports.add(
+          `import { ${toHookName(action)} } from "${hooksPath}/hooks";`,
+        );
+      }
+    }
 
-  private emitDetailComponent(
-    name: string,
-    component: IRComponent,
-    ir: TandemIR
-  ): GeneratedCode {
-    const displayType = component.displays
-      ? this.typeMapper.mapType(component.displays)
-      : "unknown";
-    const typeShortName = this.getTypeShortName(component.displays);
+    // Add type imports
+    if (typeShortName && typeShortName !== "Data") {
+      imports.add(
+        `import type { ${typeShortName} } from "${typesPath}/types";`,
+      );
+    }
 
-    const actionHooks =
-      component.actions && component.actions.length > 0
-        ? component.actions
-            .map((a) => `import { ${toHookName(a)} } from "../hooks";`)
-            .join("\n")
-        : "";
+    content += Array.from(imports).join("\n") + "\n\n";
 
-    let content = `// Generated by Tandem - DO NOT EDIT
-${actionHooks ? actionHooks + "\n" : ""}import { ${typeShortName} } from "../types";
+    // Add props interface
+    content += this.generatePropsInterface(name, component, displayType);
 
-interface ${name}Props {
-  data: ${displayType};
-  isLoading?: boolean;
-  onAction?: (action: string) => void;
-}
+    // Add component JSDoc
+    if (component.spec) {
+      content += `/**\n * ${component.spec}\n */\n`;
+    }
 
-/**
- * ${component.spec || `Detail view for ${typeShortName}`}
- */
-export function ${name}({ data, isLoading, onAction }: ${name}Props) {
-  if (isLoading) {
-    return <div className="tandem-loading">Loading...</div>;
-  }
+    // Build the component function
+    content += `export function ${name}(props: ${name}Props) {\n`;
 
-  return (
-    <div className="tandem-detail">
-      <div className="tandem-detail-content">
-        {/* TODO: AI should render detailed fields from ${typeShortName} */}
-        {Object.entries(data as Record<string, unknown>).map(([key, value]) => (
-          <div key={key} className="tandem-detail-field">
-            <span className="tandem-detail-label">{key}:</span>
-            <span className="tandem-detail-value">{String(value)}</span>
-          </div>
-        ))}
-      </div>
-      ${this.generateActionButtons(component.actions || [])}
-    </div>
-  );
-}
-`;
-    return { filename: `components/${name}.tsx`, content };
-  }
+    // Add hooks
+    if (code.hooks?.length) {
+      for (const hook of code.hooks) {
+        content += `  ${hook}\n`;
+      }
+      content += "\n";
+    }
 
-  private emitGenericComponent(
-    name: string,
-    component: IRComponent
-  ): GeneratedCode {
-    let content = `// Generated by Tandem - DO NOT EDIT
+    // Add handlers
+    if (code.handlers?.length) {
+      for (const handler of code.handlers) {
+        content += `  ${handler.implementation}\n\n`;
+      }
+    }
 
-interface ${name}Props {
-  // TODO: Define props for ${component.element} component
-}
+    // Add return with JSX
+    content += `  return (\n`;
+    content += this.indentCode(code.jsx, 4);
+    content += `\n  );\n`;
+    content += `}\n`;
 
-/**
- * ${component.spec || `${component.element} component`}
- */
-export function ${name}(props: ${name}Props) {
-  return (
-    <div className="tandem-${component.element}">
-      {/* TODO: Implement ${component.element} component */}
-    </div>
-  );
-}
-`;
-    return { filename: `components/${name}.tsx`, content };
-  }
-
-  private generateActionButtons(
-    actions: string[],
-    dataVar: string = ""
-  ): string {
-    if (actions.length === 0) return "";
-
-    const buttonParams = dataVar ? `"${shorten(actions[0])}", ${dataVar}` : `"${shorten(actions[0])}"`;
-
-    return `<div className="tandem-actions">
-        ${actions
-          .map((a) => {
-            const actionName = shorten(a);
-            const params = dataVar ? `"${actionName}", ${dataVar}` : `"${actionName}"`;
-            return `<button onClick={() => onAction?.(${params})}>${actionName}</button>`;
-          })
-          .join("\n        ")}
-      </div>`;
-  }
-
-  private emitIndex(ir: TandemIR): GeneratedCode {
-    const exports = Array.from(ir.components.keys())
-      .map((fqn) => {
-        const name = shorten(fqn);
-        return `export { ${name} } from "./${name}";`;
-      })
-      .join("\n");
+    // Add styles if present
+    if (code.styles) {
+      content += `\n// Styles\n${code.styles}\n`;
+    }
 
     return {
-      filename: "components/index.ts",
-      content: `// Generated by Tandem - DO NOT EDIT\n${exports}\n`,
+      filename: `components/${name}.tsx`,
+      content,
     };
+  }
+
+  /**
+   * Generate props interface for a component.
+   */
+  private generatePropsInterface(
+    name: string,
+    component: IRComponent,
+    displayType?: string,
+  ): string {
+    let content = `interface ${name}Props {\n`;
+
+    if (displayType) {
+      content += `  data: ${displayType};\n`;
+    }
+
+    if (component.element === "form") {
+      content += `  onSuccess?: () => void;\n`;
+      content += `  onError?: (error: Error) => void;\n`;
+      content += `  initialData?: Partial<${displayType || "unknown"}>;\n`;
+    } else if (component.element === "modal") {
+      content += `  isOpen: boolean;\n`;
+      content += `  onClose: () => void;\n`;
+      content += `  onSuccess?: () => void;\n`;
+    } else if (component.element === "list" || component.element === "table") {
+      content += `  isLoading?: boolean;\n`;
+    }
+
+    if (component.actions?.length) {
+      content += `  onAction?: (action: string, data?: unknown) => void;\n`;
+    }
+
+    content += `}\n\n`;
+    return content;
+  }
+
+  /**
+   * Extract React hook names from hook statements.
+   */
+  private extractReactHookNames(hooks: string[]): string[] {
+    const reactHooks = [
+      "useState",
+      "useEffect",
+      "useCallback",
+      "useMemo",
+      "useRef",
+      "useContext",
+      "useReducer",
+    ];
+    const found = new Set<string>();
+
+    for (const hook of hooks) {
+      for (const reactHook of reactHooks) {
+        if (hook.includes(reactHook)) {
+          found.add(reactHook);
+        }
+      }
+    }
+
+    return Array.from(found);
+  }
+
+  /**
+   * Indent code by spaces.
+   */
+  private indentCode(code: string, spaces: number): string {
+    const indent = " ".repeat(spaces);
+    return code
+      .split("\n")
+      .map((line) => (line.trim() ? indent + line : line))
+      .join("\n");
+  }
+
+  /**
+   * Get the component directory name from a module path.
+   */
+  private getComponentDir(modulePath: string): string {
+    const parts = modulePath.split(".");
+    return parts[parts.length - 1];
+  }
+
+  /**
+   * Get relative path from component to hooks/types based on module.
+   */
+  private getRelativeHooksPath(componentModulePath: string): string {
+    const componentDir = `components/${this.getComponentDir(componentModulePath)}`;
+    const hooksDir = moduleToDirectory(componentModulePath);
+    return getRelativeImportPath(componentDir, hooksDir);
+  }
+
+  /**
+   * Get relative path from component to types.
+   */
+  private getRelativeTypesPath(componentModulePath: string): string {
+    const componentDir = `components/${this.getComponentDir(componentModulePath)}`;
+    const typesDir = moduleToDirectory(componentModulePath);
+    return getRelativeImportPath(componentDir, typesDir);
+  }
+
+  private emitModuleIndex(componentNames: string[]): string {
+    const exports = componentNames
+      .sort()
+      .map((name) => `export { ${name} } from "./${name}";`)
+      .join("\n");
+
+    return `// Generated by Tandem - DO NOT EDIT\n${exports}\n`;
+  }
+
+  private emitAggregateIndex(moduleExports: Map<string, string[]>): string {
+    let content = "// Generated by Tandem - DO NOT EDIT\n";
+    content += "// Aggregate component exports from all modules\n\n";
+
+    const sortedModules = Array.from(moduleExports.keys()).sort();
+
+    for (const moduleDir of sortedModules) {
+      const names = moduleExports.get(moduleDir)!;
+      if (names.length > 0) {
+        const sortedNames = names.sort().join(", ");
+        content += `export { ${sortedNames} } from "./${moduleDir}";\n`;
+      }
+    }
+
+    return content;
   }
 
   private getTypeShortName(typeRef?: IRTypeRef): string {
