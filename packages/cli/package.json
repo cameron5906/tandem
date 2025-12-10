@@ -17,6 +17,8 @@
     "@tandem-lang/compiler": "workspace:*",
     "@tandem-lang/generator-core": "workspace:*",
     "@tandem-lang/generator-ts": "workspace:*",
+    "@tandem-lang/llm": "workspace:*",
+    "@inquirer/prompts": "^7.0.0",
     "commander": "^11.0.0"
   }
 }

@@ -8,6 +8,7 @@
     "references": [
     { "path": "../compiler" },
     { "path": "../generator-core" },
-    { "path": "../generator-ts" }
+    { "path": "../generator-ts" },
+    { "path": "../llm" }
   ]
 }
