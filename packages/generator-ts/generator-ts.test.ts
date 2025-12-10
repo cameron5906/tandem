@@ -29,8 +29,25 @@ import {
   registerAllGenerators,
 } from "./src";
 import { generatorRegistry, GeneratorContext } from "@tandem-lang/generator-core";
+import {
+  MockProvider,
+  CodeGenerationPipeline,
+  IRContextBuilder,
+} from "@tandem-lang/llm";
 import * as fs from "fs";
 import * as path from "path";
+
+// Helper to create a mock pipeline for tests
+function createMockPipeline(): CodeGenerationPipeline {
+  const provider = new MockProvider({ apiKey: "mock-key", model: "mock-model" });
+  provider.setMockResponse({
+    implementation: 'res.json({ message: "Mock implementation" });',
+    validation: "",
+    imports: [],
+  });
+  const contextBuilder = new IRContextBuilder();
+  return new CodeGenerationPipeline(provider, contextBuilder, { maxRetries: 1 });
+}
 
 const sampleTdmPath = path.resolve(__dirname, "../../samples/sample.tdm");
 const source = fs.readFileSync(sampleTdmPath, "utf-8");
@@ -155,9 +172,11 @@ describe("TypeDeclarationEmitter", () => {
 
     const files = emitter.emit(ir);
 
-    expect(files).toHaveLength(1);
-    expect(files[0].filename).toBe("types.ts");
-    expect(typeof files[0].content).toBe("string");
+    // Modular output: per-module types.ts + aggregate types.ts
+    expect(files.length).toBeGreaterThanOrEqual(1);
+    const aggregateFile = files.find((f) => f.filename === "types.ts");
+    expect(aggregateFile).toBeDefined();
+    expect(typeof aggregateFile!.content).toBe("string");
   });
 
   it("emits type aliases", () => {
@@ -541,9 +560,7 @@ intent route GetUser {
 // =============================================================================
 
 describe("ExpressRouteEmitter", () => {
-  const emitter = new ExpressRouteEmitter();
-
-  it("generates handlers and router files", () => {
+  it("generates handlers and router files", async () => {
     const source = `
 @backend(express)
 module test.api
@@ -564,14 +581,17 @@ intent route CreateTask {
 `;
     const { program } = parseTandem(source);
     const { ir } = compileToIR(program);
-    const files = emitter.emit(ir);
+    const emitter = new ExpressRouteEmitter({ pipeline: createMockPipeline() });
+    const files = await emitter.emit(ir);
 
-    expect(files).toHaveLength(2);
-    expect(files[0].filename).toBe("routes/handlers.ts");
-    expect(files[1].filename).toBe("routes/index.ts");
+    // Modular output: per-module handlers.ts + routes.ts + aggregate routes/index.ts
+    const filenames = files.map((f) => f.filename);
+    expect(filenames).toContain("test/api/handlers.ts");
+    expect(filenames).toContain("test/api/routes.ts");
+    expect(filenames).toContain("routes/index.ts");
   });
 
-  it("generates typed handlers with correct HTTP method behavior", () => {
+  it("generates typed handlers with correct HTTP method behavior", async () => {
     const source = `
 @backend(express)
 module test.api
@@ -588,8 +608,10 @@ intent route CreateTask {
 `;
     const { program } = parseTandem(source);
     const { ir } = compileToIR(program);
-    const files = emitter.emit(ir);
-    const handlersContent = files[0].content;
+    const emitter = new ExpressRouteEmitter({ pipeline: createMockPipeline() });
+    const files = await emitter.emit(ir);
+    const handlersFile = files.find((f) => f.filename === "test/api/handlers.ts");
+    const handlersContent = handlersFile!.content;
 
     // GET handler should use req.query
     expect(handlersContent).toContain("getTaskHandler");
@@ -600,7 +622,7 @@ intent route CreateTask {
     expect(handlersContent).toContain("req.body as CreateTaskInput");
   });
 
-  it("generates router with correct HTTP methods", () => {
+  it("generates router with correct HTTP methods", async () => {
     const source = `
 @backend(express)
 module test.api
@@ -612,8 +634,10 @@ intent route DeleteTask { input: { id: UUID } output: Bool }
 `;
     const { program } = parseTandem(source);
     const { ir } = compileToIR(program);
-    const files = emitter.emit(ir);
-    const routerContent = files[1].content;
+    const emitter = new ExpressRouteEmitter({ pipeline: createMockPipeline() });
+    const files = await emitter.emit(ir);
+    const routerFile = files.find((f) => f.filename === "test/api/routes.ts");
+    const routerContent = routerFile!.content;
 
     expect(routerContent).toContain('router.get("/getTask"');
     expect(routerContent).toContain('router.post("/createTask"');
@@ -621,7 +645,7 @@ intent route DeleteTask { input: { id: UUID } output: Bool }
     expect(routerContent).toContain('router.delete("/deleteTask"');
   });
 
-  it("includes JSDoc comments from spec", () => {
+  it("includes JSDoc comments from spec", async () => {
     const source = `
 @backend(express)
 module test.api
@@ -634,9 +658,11 @@ intent route GetTask {
 `;
     const { program } = parseTandem(source);
     const { ir } = compileToIR(program);
-    const files = emitter.emit(ir);
+    const emitter = new ExpressRouteEmitter({ pipeline: createMockPipeline() });
+    const files = await emitter.emit(ir);
+    const handlersFile = files.find((f) => f.filename === "test/api/handlers.ts");
 
-    expect(files[0].content).toContain("* Fetch a task by its unique identifier");
+    expect(handlersFile!.content).toContain("* Fetch a task by its unique identifier");
   });
 });
 
@@ -658,11 +684,13 @@ intent route CreateTask { input: { title: String } output: String }
     const emitter = new ApiClientEmitter();
     const files = emitter.emit(ir);
 
-    expect(files).toHaveLength(1);
-    expect(files[0].filename).toBe("api/client.ts");
-    expect(files[0].content).toContain("export const api = {");
-    expect(files[0].content).toContain("getTask:");
-    expect(files[0].content).toContain("createTask:");
+    // Modular output: per-module client.ts + aggregate api/client.ts
+    const filenames = files.map((f) => f.filename);
+    expect(filenames).toContain("test/api/client.ts");
+    expect(filenames).toContain("api/client.ts");
+    const moduleClient = files.find((f) => f.filename === "test/api/client.ts");
+    expect(moduleClient!.content).toContain("getTask:");
+    expect(moduleClient!.content).toContain("createTask:");
   });
 
   it("uses correct HTTP methods for queries and mutations", () => {
@@ -679,7 +707,8 @@ intent route DeleteTask { input: { id: UUID } output: Bool }
     const { ir } = compileToIR(program);
     const emitter = new ApiClientEmitter();
     const files = emitter.emit(ir);
-    const content = files[0].content;
+    const moduleClient = files.find((f) => f.filename === "test/api/client.ts");
+    const content = moduleClient!.content;
 
     // GET methods use query string
     expect(content).toContain('method: "GET"');
@@ -702,8 +731,9 @@ intent route GetTask { input: { id: UUID } output: String }
     const { ir } = compileToIR(program);
     const emitter = new ApiClientEmitter({ baseUrl: "/custom/api" });
     const files = emitter.emit(ir);
+    const moduleClient = files.find((f) => f.filename === "test/api/client.ts");
 
-    expect(files[0].content).toContain('BASE_URL = "/custom/api"');
+    expect(moduleClient!.content).toContain('BASE_URL = "/custom/api"');
   });
 });
 
@@ -725,8 +755,10 @@ intent route CreateTask { input: { title: String } output: String }
     const emitter = new ReactHooksEmitter();
     const files = emitter.emit(ir);
 
-    expect(files).toHaveLength(1);
-    expect(files[0].filename).toBe("hooks/index.ts");
+    // Modular output: per-module hooks.ts + aggregate hooks/index.ts
+    const filenames = files.map((f) => f.filename);
+    expect(filenames).toContain("test/api/hooks.ts");
+    expect(filenames).toContain("hooks/index.ts");
   });
 
   it("generates useQuery hooks for query intents", () => {
@@ -740,7 +772,8 @@ intent route ListTasks { input: { limit: Int } output: String }
     const { ir } = compileToIR(program);
     const emitter = new ReactHooksEmitter();
     const files = emitter.emit(ir);
-    const content = files[0].content;
+    const moduleHooks = files.find((f) => f.filename === "test/api/hooks.ts");
+    const content = moduleHooks!.content;
 
     expect(content).toContain("export function useGetTask(");
     expect(content).toContain("export function useListTasks(");
@@ -760,7 +793,8 @@ intent route DeleteTask { input: { id: UUID } output: Bool }
     const { ir } = compileToIR(program);
     const emitter = new ReactHooksEmitter();
     const files = emitter.emit(ir);
-    const content = files[0].content;
+    const moduleHooks = files.find((f) => f.filename === "test/api/hooks.ts");
+    const content = moduleHooks!.content;
 
     expect(content).toContain("export function useCreateTask(");
     expect(content).toContain("export function useUpdateTask(");
@@ -800,10 +834,15 @@ type User { id: UserId name: String }
 
     const output = generator.generate(context);
 
-    expect(output.files).toHaveLength(1);
-    expect(output.files[0].path).toBe("types.ts");
-    expect(output.files[0].content).toContain("export type UserId");
-    expect(output.files[0].content).toContain("export interface User");
+    // Modular output: per-module types + aggregate types.ts
+    expect(output.files.length).toBeGreaterThanOrEqual(1);
+    const aggregateFile = output.files.find((f) => f.path === "types.ts");
+    expect(aggregateFile).toBeDefined();
+    // Check per-module file has the types
+    const moduleFile = output.files.find((f) => f.path === "test/types.ts");
+    expect(moduleFile).toBeDefined();
+    expect(moduleFile!.content).toContain("export type UserId");
+    expect(moduleFile!.content).toContain("export interface User");
   });
 });
 
@@ -816,7 +855,7 @@ describe("ExpressGenerator", () => {
     expect(generator.meta.framework).toBe("express");
   });
 
-  it("generates all required files", () => {
+  it("generates all required files", async () => {
     const source = `
 @backend(express)
 module test.api
@@ -829,15 +868,18 @@ intent route GetTask { input: { id: TaskId } output: String }
     const generator = new ExpressGenerator();
     const context: GeneratorContext = {
       ir,
-      config: { outputDir: "./out" },
+      config: { outputDir: "./out", llm: { provider: "mock" } },
       targetModules: Array.from(ir.modules.values()),
     };
 
-    const output = generator.generate(context);
+    const output = await generator.generate(context);
 
     const filePaths = output.files.map((f) => f.path);
+    // Aggregate types
     expect(filePaths).toContain("src/types.ts");
-    expect(filePaths).toContain("src/routes/handlers.ts");
+    // Per-module handlers and routes (modular output)
+    expect(filePaths).toContain("src/test/api/handlers.ts");
+    expect(filePaths).toContain("src/test/api/routes.ts");
     expect(filePaths).toContain("src/routes/index.ts");
     // Project files should be generated by default
     expect(filePaths).toContain("package.json");
@@ -845,7 +887,7 @@ intent route GetTask { input: { id: TaskId } output: String }
     expect(filePaths).toContain("src/index.ts");
   });
 
-  it("can skip project files", () => {
+  it("can skip project files", async () => {
     const source = `
 @backend(express)
 module test.api
@@ -856,11 +898,11 @@ intent route GetTask { input: { id: UUID } output: String }
     const generator = new ExpressGenerator({ includeProjectFiles: false });
     const context: GeneratorContext = {
       ir,
-      config: { outputDir: "./out" },
+      config: { outputDir: "./out", llm: { provider: "mock" } },
       targetModules: Array.from(ir.modules.values()),
     };
 
-    const output = generator.generate(context);
+    const output = await generator.generate(context);
 
     const filePaths = output.files.map((f) => f.path);
     expect(filePaths).not.toContain("package.json");
@@ -868,7 +910,7 @@ intent route GetTask { input: { id: UUID } output: String }
     expect(filePaths).not.toContain("src/index.ts");
   });
 
-  it("includes correct dependencies", () => {
+  it("includes correct dependencies", async () => {
     const source = `
 @backend(express)
 module test.api
@@ -879,11 +921,11 @@ intent route GetTask { input: { id: UUID } output: String }
     const generator = new ExpressGenerator();
     const context: GeneratorContext = {
       ir,
-      config: { outputDir: "./out" },
+      config: { outputDir: "./out", llm: { provider: "mock" } },
       targetModules: Array.from(ir.modules.values()),
     };
 
-    const output = generator.generate(context);
+    const output = await generator.generate(context);
 
     expect(output.dependencies).toHaveProperty("express");
     expect(output.dependencies).toHaveProperty("cors");
@@ -901,7 +943,7 @@ describe("ReactGenerator", () => {
     expect(generator.meta.framework).toBe("react");
   });
 
-  it("generates all required files", () => {
+  it("generates all required files", async () => {
     const source = `
 @frontend(react)
 module test.api
@@ -916,7 +958,7 @@ intent route GetTask { input: { id: UUID } output: String }
       targetModules: Array.from(ir.modules.values()),
     };
 
-    const output = generator.generate(context);
+    const output = await generator.generate(context);
 
     const filePaths = output.files.map((f) => f.path);
     expect(filePaths).toContain("src/types.ts");
@@ -931,7 +973,7 @@ intent route GetTask { input: { id: UUID } output: String }
     expect(filePaths).toContain("src/App.tsx");
   });
 
-  it("can skip project files", () => {
+  it("can skip project files", async () => {
     const source = `
 @frontend(react)
 module test.api
@@ -946,7 +988,7 @@ intent route GetTask { input: { id: UUID } output: String }
       targetModules: Array.from(ir.modules.values()),
     };
 
-    const output = generator.generate(context);
+    const output = await generator.generate(context);
 
     const filePaths = output.files.map((f) => f.path);
     expect(filePaths).not.toContain("package.json");
@@ -954,7 +996,7 @@ intent route GetTask { input: { id: UUID } output: String }
     expect(filePaths).not.toContain("src/main.tsx");
   });
 
-  it("includes correct dependencies", () => {
+  it("includes correct dependencies", async () => {
     const source = `
 @frontend(react)
 module test.api
@@ -969,7 +1011,7 @@ intent route GetTask { input: { id: UUID } output: String }
       targetModules: Array.from(ir.modules.values()),
     };
 
-    const output = generator.generate(context);
+    const output = await generator.generate(context);
 
     expect(output.dependencies).toHaveProperty("@tanstack/react-query");
   });
@@ -1012,7 +1054,7 @@ describe("Generator Registration", () => {
 describe("Full Stack Generation (sample-fullstack.tdm)", () => {
   const fullstackPath = path.resolve(__dirname, "../../samples/sample-fullstack.tdm");
 
-  it("generates complete output for fullstack sample", () => {
+  it("generates complete output for fullstack sample", async () => {
     const source = fs.readFileSync(fullstackPath, "utf-8");
     const { program } = parseTandem(source);
     const { ir, diagnostics } = compileToIR(program);
@@ -1023,7 +1065,7 @@ describe("Full Stack Generation (sample-fullstack.tdm)", () => {
     const typesGen = new TypesGenerator();
     const typesOutput = typesGen.generate({
       ir,
-      config: { outputDir: "./out" },
+      config: { outputDir: "./out", llm: { provider: "mock" } },
       targetModules: Array.from(ir.modules.values()),
     });
 
@@ -1034,9 +1076,9 @@ describe("Full Stack Generation (sample-fullstack.tdm)", () => {
 
     // Test ExpressGenerator
     const expressGen = new ExpressGenerator();
-    const expressOutput = expressGen.generate({
+    const expressOutput = await expressGen.generate({
       ir,
-      config: { outputDir: "./out" },
+      config: { outputDir: "./out", llm: { provider: "mock" } },
       targetModules: Array.from(ir.modules.values()),
     });
 
@@ -1048,9 +1090,9 @@ describe("Full Stack Generation (sample-fullstack.tdm)", () => {
 
     // Test ReactGenerator
     const reactGen = new ReactGenerator();
-    const reactOutput = reactGen.generate({
+    const reactOutput = await reactGen.generate({
       ir,
-      config: { outputDir: "./out" },
+      config: { outputDir: "./out", llm: { provider: "mock" } },
       targetModules: Array.from(ir.modules.values()),
     });
 

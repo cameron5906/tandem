@@ -6,7 +6,11 @@ import {
 } from "@tandem-lang/generator-core";
 import { TypeScriptTypeMapper } from "../mappers";
 import { TypeDeclarationEmitter } from "../emitters/TypeDeclarationEmitter";
-import { ExpressRouteEmitter } from "../emitters/ExpressRouteEmitter";
+import {
+  ExpressRouteEmitter,
+  ExpressRouteEmitterConfig,
+} from "../emitters/ExpressRouteEmitter";
+import type { GeneratedCode } from "../interfaces/ICodeEmitter";
 import {
   PackageJsonEmitter,
   EXPRESS_DEPENDENCIES,
@@ -16,6 +20,7 @@ import {
 import { TsConfigEmitter } from "../emitters/project/TsConfigEmitter";
 import { ExpressAppEmitter } from "../emitters/project/ExpressAppEmitter";
 import { TypeScriptGeneratorOptions, DEFAULT_GENERATOR_OPTIONS } from "./types";
+import { createPipelineFromConfig } from "../utils/pipelineFactory";
 
 /**
  * Generator for Express.js backend routes.
@@ -37,7 +42,7 @@ export class ExpressGenerator implements IFrameworkGenerator {
     this.options = { ...DEFAULT_GENERATOR_OPTIONS, ...options };
   }
 
-  generate(context: GeneratorContext): GeneratorOutput {
+  async generate(context: GeneratorContext): Promise<GeneratorOutput> {
     const files = [];
 
     // Generate shared types (in src/ directory)
@@ -45,7 +50,7 @@ export class ExpressGenerator implements IFrameworkGenerator {
     const typeEmitter = new TypeDeclarationEmitter(mapper, {
       includeIntentTypes: true,
     });
-    const typeFiles = typeEmitter.emit(context.ir);
+    const typeFiles = typeEmitter.emit(context.ir) as GeneratedCode[];
     files.push(
       ...typeFiles.map((f) => ({
         path: `src/${f.filename}`,
@@ -53,9 +58,34 @@ export class ExpressGenerator implements IFrameworkGenerator {
       }))
     );
 
+    // Map progress callback for pipeline events
+    const progressCallback = context.onProgress
+      ? (event: import("@tandem-lang/llm").PipelineProgressEvent) => {
+          const phaseMap: Record<string, "generating" | "validating" | "retrying" | "complete" | "error"> = {
+            generating: "generating",
+            validating: "validating",
+            retrying: "retrying",
+            success: "complete",
+            error: "error",
+          };
+          context.onProgress!({
+            phase: phaseMap[event.type] || "generating",
+            target: event.target,
+            message: event.message || `${event.type}: ${event.target}`,
+            attempt: event.attempt,
+            maxAttempts: event.maxAttempts,
+          });
+        }
+      : undefined;
+
+    // Build emitter config with LLM pipeline
+    const emitterConfig: ExpressRouteEmitterConfig = {
+      pipeline: createPipelineFromConfig(context.config.llm, { onProgress: progressCallback }),
+    };
+
     // Generate Express routes (in src/ directory)
-    const routeEmitter = new ExpressRouteEmitter();
-    const routeFiles = routeEmitter.emit(context.ir);
+    const routeEmitter = new ExpressRouteEmitter(emitterConfig);
+    const routeFiles = await routeEmitter.emit(context.ir);
     files.push(
       ...routeFiles.map((f) => ({
         path: `src/${f.filename}`,

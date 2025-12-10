@@ -20,18 +20,20 @@ export interface FrameworkGeneratorMeta {
 }
 
 /**
- * Main interface for framework-specific code generators
+ * Main interface for framework-specific code generators.
+ * Supports both sync and async generation for LLM-powered implementations.
  */
 export interface IFrameworkGenerator {
   /** Generator metadata */
   readonly meta: FrameworkGeneratorMeta;
 
   /**
-   * Generate code for the given context
+   * Generate code for the given context.
+   * Returns a Promise when using LLM-powered generation, or sync result otherwise.
    * @param context - Generation context with IR and config
    * @returns Generated files and configuration
    */
-  generate(context: GeneratorContext): GeneratorOutput;
+  generate(context: GeneratorContext): GeneratorOutput | Promise<GeneratorOutput>;
 
   /**
    * Validate that this generator can handle the given IR

@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@tandem-lang/compiler": "workspace:^",
-    "@tandem-lang/generator-core": "workspace:^"
+    "@tandem-lang/generator-core": "workspace:^",
+    "@tandem-lang/llm": "workspace:^"
   }
 }
