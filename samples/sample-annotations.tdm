@@ -37,6 +37,12 @@ intent route GetUserProfile {
   spec: "Fetch a user's profile with extended info"
 }
 
+intent route PostUserProfile {
+  input: { data: UserProfile }
+  output: UserProfile
+  spec: "Create a new user profile"
+}
+
 intent route UpdateProfile {
   input: {
     userId: UserId

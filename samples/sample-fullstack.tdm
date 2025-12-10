@@ -1,0 +1,165 @@
+// Full-stack Task Manager sample
+// Demonstrates generating both React frontend and Express backend from a single spec
+// Run: node packages/cli/dist/index.js ir samples/sample-fullstack.tdm
+
+@backend(express)
+@frontend(react)
+module app.tasks
+
+// === Type Aliases ===
+
+type TaskId = UUID
+type UserId = UUID
+
+// === Domain Types ===
+
+type Task {
+  id: TaskId
+  title: String
+  description: String?
+  status: String
+  priority: String
+  dueDate: Date?
+  createdAt: DateTime
+  updatedAt: DateTime
+  assigneeId: UserId?
+}
+
+type TaskList {
+  tasks: List<Task>
+  total: Int
+}
+
+type TaskError {
+  code: String
+  message: String
+}
+
+// === API Contracts ===
+
+// List all tasks with optional filtering
+intent route ListTasks {
+  input: {
+    status: String?
+    assigneeId: UserId?
+    limit: Int?
+    offset: Int?
+  }
+  output: TaskList
+  spec: "Retrieve tasks with optional status and assignee filters"
+}
+
+// Get a single task by ID
+intent route GetTask {
+  input: { id: TaskId }
+  output: Result<Task, TaskError>
+  spec: "Fetch a task by its ID"
+}
+
+// Create a new task
+intent route CreateTask {
+  input: {
+    title: String
+    description: String?
+    priority: String
+    dueDate: Date?
+    assigneeId: UserId?
+  }
+  output: Result<Task, TaskError>
+  spec: "Create a new task"
+}
+
+// Update an existing task
+intent route UpdateTask {
+  input: {
+    id: TaskId
+    title: String?
+    description: String?
+    status: String?
+    priority: String?
+    dueDate: Date?
+  }
+  output: Result<Task, TaskError>
+  spec: "Update task fields"
+}
+
+// Delete a task
+intent route DeleteTask {
+  input: { id: TaskId }
+  output: Result<Bool, TaskError>
+  spec: "Delete a task by ID"
+}
+
+// Mark a task as complete
+intent route CompleteTask {
+  input: { id: TaskId }
+  output: Result<Task, TaskError>
+  spec: "Mark a task as completed"
+}
+
+// Assign a task to a user
+intent route AssignTask {
+  input: {
+    taskId: TaskId
+    assigneeId: UserId?
+  }
+  output: Result<Task, TaskError>
+  spec: "Assign or unassign a task to a user"
+}
+
+// === UI Components ===
+
+// Task card for displaying individual tasks
+component TaskCard {
+  element: card
+  displays: Task
+  actions: [UpdateTask, CompleteTask, DeleteTask]
+  spec: "Displays task details with priority indicator and action buttons"
+}
+
+// Form for creating new tasks
+component CreateTaskForm {
+  element: form
+  binds: CreateTask
+  spec: "Form with title, description, priority, due date, and assignee fields"
+}
+
+// Form for editing existing tasks
+component EditTaskModal {
+  element: modal
+  binds: UpdateTask
+  displays: Task
+  spec: "Modal dialog for editing task properties"
+}
+
+// List view of all tasks
+component TaskList {
+  element: list
+  displays: List<Task>
+  itemComponent: TaskCard
+  emptyState: "No tasks found. Create one to get started!"
+  spec: "Scrollable list of tasks with loading and empty states"
+}
+
+// Table view for task management
+component TaskTable {
+  element: table
+  displays: List<Task>
+  actions: [UpdateTask, CompleteTask, DeleteTask, AssignTask]
+  emptyState: "No tasks to display"
+  spec: "Tabular view with sortable columns and bulk actions"
+}
+
+// Detail view for a single task
+component TaskDetail {
+  element: detail
+  displays: Task
+  actions: [UpdateTask, CompleteTask, AssignTask]
+  spec: "Full task details with metadata and action toolbar"
+}
+
+// Main dashboard component
+component TaskDashboard {
+  element: dashboard
+  spec: "Overview with task statistics, recent tasks, and quick actions"
+}

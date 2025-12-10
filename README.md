@@ -1,8 +1,8 @@
 # Tandem
 
-A domain-specific language (DSL) for generating type-safe applications.
+A domain-specific language (DSL) for generating type-safe applications with AI-powered code generation.
 
-Define **modules**, **types**, and **intents** in Tandem, and generate real, type-safe backend + frontend code. The long-term vision: generative AI as a compiler phase, not just autocomplete.
+Define **modules**, **types**, and **intents** in Tandem, and generate real, type-safe backend + frontend code. Tandem integrates LLM providers (OpenAI, Anthropic, Gemini) as a compiler phase to generate actual implementations, not just types and stubs.
 
 ## Quick Start
 
@@ -14,7 +14,11 @@ pnpm install
 pnpm build
 
 # Generate TypeScript from a Tandem file
-pnpm tandem generate samples/sample.tdm
+pnpm tandem generate samples/sample.tdm -o ./output
+
+# Generate with AI-powered implementations
+export OPENAI_API_KEY=sk-...
+pnpm tandem generate samples/sample.tdm --llm -o ./output
 ```
 
 ## Language Features
@@ -126,7 +130,9 @@ tandem/
     compiler/       # AST + IR pipeline with type resolution
     generator-core/ # Plugin interfaces and registry
     generator-ts/   # TypeScript code generation
+    llm/            # AI-powered code generation
     cli/            # Command-line interface
+    vscode/         # VS Code extension (syntax highlighting)
   samples/          # Example .tdm files
 ```
 
@@ -135,6 +141,7 @@ tandem/
 ```
 grammar → compiler → generator-core
                   ↘ generator-ts → cli
+                  ↘ llm ───────────↗
 ```
 
 ## CLI Commands
@@ -147,7 +154,18 @@ pnpm tandem parse <file>
 pnpm tandem ir <file>
 
 # Generate TypeScript
-pnpm tandem generate <file>
+pnpm tandem generate <file> -o ./output
+
+# Generate with LLM-powered implementations
+pnpm tandem generate <file> --llm -o ./output
+
+# Use specific provider
+pnpm tandem generate <file> --llm --llm-provider anthropic
+
+# Configuration commands
+pnpm tandem config show      # Show current config
+pnpm tandem config providers # List available LLM providers
+pnpm tandem config init      # Create template config file
 ```
 
 ## Architecture
@@ -166,9 +184,9 @@ Source (.tdm)
 └──────────┘
     │
     ▼
-┌───────────────┐
-│ Generator-TS  │  IR → TypeScript code
-└───────────────┘
+┌───────────────┐     ┌─────────────────┐
+│ Generator-TS  │ ←── │ LLM             │  AI implementations
+└───────────────┘     └─────────────────┘
     │
     ▼
 Output (.ts)
@@ -181,6 +199,7 @@ Output (.ts)
 | **Grammar** | Syntax only - tokenization and parsing |
 | **Compiler** | Semantics - AST construction, type resolution, IR generation |
 | **Generator** | Output - target-specific code emission |
+| **LLM** | AI-powered implementation generation with validation |
 
 ### Intermediate Representation (IR)
 
@@ -210,6 +229,48 @@ pnpm test
 cd packages/grammar && pnpm build
 ```
 
+## AI-Powered Generation
+
+Tandem can use LLMs to generate actual implementations, not just type stubs. When enabled, the generator:
+
+1. **Builds context** from the IR (types, intents, annotations)
+2. **Generates prompts** with semantic hints
+3. **Calls the LLM** with structured output schemas
+4. **Validates output** with TypeScript compiler
+5. **Retries on failure** with error context
+
+### Supported Providers
+
+| Provider | Models | Env Variable |
+|----------|--------|--------------|
+| OpenAI | gpt-4o, gpt-4-turbo | `OPENAI_API_KEY` |
+| Anthropic | claude-sonnet-4, claude-3-opus | `ANTHROPIC_API_KEY` |
+| Gemini | gemini-2.0-flash, gemini-1.5-pro | `GEMINI_API_KEY` |
+| Mock | (for testing) | - |
+
+### Configuration
+
+Create `tandem.config.json`:
+
+```json
+{
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "temperature": 0.2,
+    "maxRetries": 3
+  }
+}
+```
+
+Or use environment variables:
+
+```bash
+export TANDEM_LLM_PROVIDER=openai
+export TANDEM_LLM_MODEL=gpt-4o
+export OPENAI_API_KEY=sk-...
+```
+
 ## Roadmap
 
 ### Current (v0.1)
@@ -220,15 +281,15 @@ cd packages/grammar && pnpm build
 - [x] Module annotations
 - [x] TypeScript type generation
 - [x] Generator plugin architecture
+- [x] Express route generation from intents
+- [x] React hooks and component generation
+- [x] AI-powered implementation generation
+- [x] Multi-provider LLM support (OpenAI, Anthropic, Gemini)
+- [x] Code validation with automatic retry
 
 ### Next
-- [ ] Express route generation from intents
-- [ ] React hooks generation
 - [ ] Multi-file/multi-module support
-- [ ] CLI file output (not just stdout)
-
-### Future
-- [ ] AI-powered implementation generation
+- [ ] Component declaration syntax
 - [ ] Validation and constraints
 - [ ] Additional language targets (Python, Go)
 
@@ -248,6 +309,7 @@ See individual package READMEs for detailed API documentation:
 - [compiler](packages/compiler/README.md) - AST and IR
 - [generator-core](packages/generator-core/README.md) - Plugin architecture
 - [generator-ts](packages/generator-ts/README.md) - TypeScript generation
+- [llm](packages/llm/README.md) - AI-powered code generation
 - [cli](packages/cli/README.md) - Command-line interface
 
 ## License
