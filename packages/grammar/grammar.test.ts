@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { parser } from './src/index';
+import {
+  PRIMITIVE_TYPE_NAMES,
+  GENERIC_TYPE_NAMES,
+} from '@tandem-lang/compiler';
 
 describe('@tandem-lang/grammar', () => {
   it('parses a simple module declaration', () => {
@@ -228,6 +232,33 @@ component UserCard {
 
       cursor.firstChild();
       expect(cursor.name).toBe('ComponentDecl');
+    });
+  });
+
+  describe('Type references', () => {
+    it('accepts all compiler-defined primitive types', () => {
+      for (const name of PRIMITIVE_TYPE_NAMES) {
+        const source = `type T { f: ${name} }`;
+        const tree = parser.parse(source);
+        expect(tree.cursor().name).toBe('Program');
+      }
+    });
+
+    it('accepts all compiler-defined generic types', () => {
+      for (const name of GENERIC_TYPE_NAMES) {
+        const source = `type T { f: ${name}<String${name === 'Map' || name === 'Result' ? ', Int' : ''}> }`;
+        const tree = parser.parse(source);
+        expect(tree.cursor().name).toBe('Program');
+      }
+    });
+
+    it('accepts optional and array shorthand over primitives', () => {
+      const source = `type T {
+  maybe: String?
+  many: Int[]
+}`;
+      const tree = parser.parse(source);
+      expect(tree.cursor().name).toBe('Program');
     });
   });
 });

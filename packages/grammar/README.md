@@ -73,6 +73,12 @@ String?        // Optional<String>
 Int[]          // List<Int>
 ```
 
+### Built-in Types (source of truth in compiler)
+The grammar accepts any identifier as a type name; the set of built-in primitives and generics is defined in `@tandem-lang/compiler/src/types.ts` and mirrored in tests here. Current built-ins include:
+
+- Primitives: `String`, `Int`, `Float`, `Bool`, `UUID`, `DateTime`, `Decimal`, `URL`, `Email`, `Date`, `Time`, `Duration`, `JSON`
+- Generics: `Optional<T>`, `List<T>`, `Map<K, V>`, `Result<T, E>`
+
 ### Module Annotations
 ```tandem
 @backend(express)
